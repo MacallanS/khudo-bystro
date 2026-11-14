@@ -13,13 +13,13 @@ cpSync(dist, tmp, { recursive: true })
 writeFileSync(join(tmp, '.nojekyll'), '')
 
 function git(args, cwd = tmp) {
-  const r = spawnSync('git', args, { cwd, stdio: 'inherit', shell: true })
+  const r = spawnSync('git', args, { cwd, stdio: 'inherit' })
   if (r.status !== 0) process.exit(r.status ?? 1)
 }
 
 git(['init', '-b', 'gh-pages'])
 git(['add', '-A'])
-git(['commit', '-m', 'Deploy GitHub Pages build'])
+git(['-c', 'user.email=pages@khudo.local', '-c', 'user.name=khudo-pages', 'commit', '-m', 'Deploy GitHub Pages build'])
 git(['remote', 'add', 'origin', 'https://github.com/MacallanS/khudo-bystro.git'])
 git(['push', '-f', 'origin', 'gh-pages'])
 
