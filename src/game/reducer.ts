@@ -236,7 +236,7 @@ function completeSlot(
   )
   const next = state.currentSlotIndex + 1
   if (next >= slots.length) {
-    const plan = quizPlan(state.players.length, state.settings.wordCount)
+    const plan = quizPlan(state.players.length, slots.length)
     return {
       ...state,
       phase: 'quiz',
@@ -401,10 +401,12 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
 
     case 'ANSWER': {
       if (state.selectedSlotIndex == null) return state
+      const slotIndex = state.selectedSlotIndex
+      if (state.slots[slotIndex]?.answered) return state
       const asker = currentAsker(state)
       if (!asker) return state
       const artist = state.players[state.artistIndex]
-      const slotIndex = state.selectedSlotIndex
+      if (!artist) return state
 
       const slots = state.slots.map((s, i) =>
         i === slotIndex

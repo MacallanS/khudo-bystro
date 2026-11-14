@@ -193,7 +193,6 @@ export const WORD_BANK: WordEntry[] = [
   { w: 'полка', c: 'home' },
   { w: 'ваза', c: 'home' },
   { w: 'стена', c: 'home' },
-  { w: 'пол', c: 'home' },
   { w: 'потолок', c: 'home' },
   { w: 'кухня', c: 'home' },
   { w: 'ванная', c: 'home' },

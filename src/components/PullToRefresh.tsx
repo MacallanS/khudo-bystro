@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 
 const THRESHOLD = 72
 const MAX_PULL = 120
+const RELOAD_GUARD_KEY = 'khudo-ptr-reload-at'
 
 function atScrollTop(): boolean {
   return (window.scrollY || document.documentElement.scrollTop || 0) <= 0
@@ -16,18 +17,34 @@ function shouldIgnoreTarget(target: EventTarget | null): boolean {
   )
 }
 
-async function reloadApp(): Promise<void> {
-  // Дать pagehide/flush сохранить партию до перезагрузки
-  window.dispatchEvent(new Event('pagehide'))
+/** Жёсткий reload без ожидания SW.update() — на мобиле update() часто зависает. */
+function reloadApp(): void {
+  const now = Date.now()
+  const last = Number(sessionStorage.getItem(RELOAD_GUARD_KEY) || 0)
+  sessionStorage.setItem(RELOAD_GUARD_KEY, String(now))
+
+  // Сохранить партию до ухода
   try {
-    const regs = await navigator.serviceWorker?.getRegistrations()
-    if (regs?.length) {
-      await Promise.all(regs.map((r) => r.update().catch(() => undefined)))
-    }
+    window.dispatchEvent(new Event('pagehide'))
   } catch {
     // ignore
   }
-  window.location.reload()
+
+  // Фоном пнуть SW, но не ждать — иначе спиннер бесконечный
+  if (now - last > 4000) {
+    try {
+      void navigator.serviceWorker?.getRegistration().then((reg) => {
+        void reg?.update().catch(() => undefined)
+      })
+    } catch {
+      // ignore
+    }
+  }
+
+  // cache-bust на случай залипшего SW-документа
+  const url = new URL(window.location.href)
+  url.searchParams.set('_r', String(now))
+  window.location.replace(url.toString())
 }
 
 /** Pull-down refresh — только анимация, без подписей. */
@@ -37,6 +54,7 @@ export function PullToRefresh() {
   const startY = useRef(0)
   const tracking = useRef(false)
   const pullRef = useRef(0)
+  const firedRef = useRef(false)
 
   useEffect(() => {
     pullRef.current = pull
@@ -44,7 +62,7 @@ export function PullToRefresh() {
 
   useEffect(() => {
     const onStart = (e: TouchEvent) => {
-      if (refreshing) return
+      if (refreshing || firedRef.current) return
       if (!atScrollTop()) return
       if (shouldIgnoreTarget(e.target)) return
       if (e.touches.length !== 1) return
@@ -53,7 +71,7 @@ export function PullToRefresh() {
     }
 
     const onMove = (e: TouchEvent) => {
-      if (!tracking.current || refreshing) return
+      if (!tracking.current || refreshing || firedRef.current) return
       if (!atScrollTop()) {
         tracking.current = false
         setPull(0)
@@ -72,13 +90,15 @@ export function PullToRefresh() {
       if (!tracking.current) return
       tracking.current = false
       const amount = pullRef.current
-      if (amount < THRESHOLD || refreshing) {
+      if (amount < THRESHOLD || refreshing || firedRef.current) {
         setPull(0)
         return
       }
+      firedRef.current = true
       setPull(THRESHOLD)
       setRefreshing(true)
-      void reloadApp()
+      // Микротаск — чтобы спиннер успел отрисоваться, потом сразу reload
+      window.setTimeout(() => reloadApp(), 80)
     }
 
     document.addEventListener('touchstart', onStart, { passive: true })

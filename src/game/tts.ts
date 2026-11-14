@@ -29,7 +29,8 @@ const PLAYBACK_RATE: Record<Speed, number> = {
 const PIPER_VOICE = 'ru_RU-irina-medium' as const
 /** На мобильном github.io 900 ms часто не хватает → ложный fallback на native. */
 const SILERO_PROBE_MS = 6_000
-const SILERO_FETCH_MS = 10_000
+/** Короче на мобиле: 404/зависание SW не должны жечь 20 с на слово */
+const SILERO_FETCH_MS = 5_000
 const PIPER_READY_MS = 45_000
 
 export type NarratorEngine = 'silero' | 'piper' | 'google' | 'native'
@@ -183,12 +184,11 @@ async function fetchSileroAudio(
     if (signal) return await fetchToObjectUrl(baked, signal, 'silero')
     return await fetchWithTimeout(baked, SILERO_FETCH_MS, 'silero')
   } catch (first) {
-    // Повтор: мобильный CDN иногда рвёт первый запрос.
+    // Один быстрый повтор — не два длинных таймаута подряд.
     try {
       if (signal?.aborted) throw first
-      return await fetchWithTimeout(baked, SILERO_FETCH_MS, 'silero')
+      return await fetchWithTimeout(baked, Math.min(SILERO_FETCH_MS, 3_000), 'silero')
     } catch {
-      // Локальный /api/tts только в dev — на Pages его нет, не тратим время.
       if (import.meta.env.PROD) throw first
       const { src, engine } = await fetchToObjectUrl(localTtsUrl(word), signal)
       if (engine !== 'silero' && engine !== 'proxy') {
@@ -369,7 +369,8 @@ async function synthesizeQueued(normalized: string): Promise<string> {
 }
 
 function trimCache(): void {
-  if (cache.size <= 200) return
+  // Раунд 40 слов × 2 (номер+слово) + запас — не выкидывать wav посреди диктанта
+  if (cache.size <= 400) return
   const first = cache.keys().next().value
   if (!first) return
   const old = cache.get(first)
@@ -675,7 +676,14 @@ export async function speakWord(
     await playSrc(src, speed, gen)
   } catch (err) {
     if (isStale(gen, opts)) return
-    // Fallback на native только с RU-голосом — иначе «бред» хуже явной ошибки.
+    // На телефоне native часто «кривой» (не тот язык / каша). Если уже Silero/Piper —
+    // не скатываемся, лучше тишина/ошибка слота, чем бред.
+    if (
+      stickyEngine &&
+      (activeEngine === 'silero' || activeEngine === 'piper')
+    ) {
+      throw err instanceof Error ? err : new Error('speak failed')
+    }
     if (hasRuVoice()) {
       try {
         await speakNative(text, speed, gen)

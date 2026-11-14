@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -5,6 +6,10 @@ import { ttsProxyPlugin } from './vite-plugin-tts.ts'
 
 export default defineConfig({
   base: '/khudo-bystro/',
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
+  },
   plugins: [
     react(),
     ttsProxyPlugin(),

@@ -6,7 +6,6 @@ type Props = {
   players: Player[]
   summary: { correct: number; missed: number } | null
   finished: boolean
-  nextArtistName?: string
   onNext: () => void
   onHome: () => void
   onRematch: () => void
@@ -17,7 +16,6 @@ export function ScoreScreen({
   players,
   summary,
   finished,
-  nextArtistName,
   onNext,
   onHome,
   onRematch,
@@ -51,7 +49,8 @@ export function ScoreScreen({
 
       {summary && (
         <p className="hint">
-          Вспомнил {summary.correct} из {summary.correct + summary.missed}
+          В этом раунде вспомнил {summary.correct} из{' '}
+          {summary.correct + summary.missed}
         </p>
       )}
 
@@ -64,12 +63,6 @@ export function ScoreScreen({
           </li>
         ))}
       </ol>
-
-      {!finished && nextArtistName && (
-        <div className="pass-phone" role="status">
-          Дальше рисует <strong>{nextArtistName}</strong> — передай телефон
-        </div>
-      )}
 
       <div className="cta-stack">
         {finished ? (

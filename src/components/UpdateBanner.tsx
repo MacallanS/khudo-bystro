@@ -1,8 +1,13 @@
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
-const CHECK_MS = 60_000
+const CHECK_MS = 120_000
+const RELOAD_GUARD_KEY = 'khudo-sw-reload-at'
 
-/** Silent PWA auto-update: no banner, activate + reload when a new SW is ready. */
+/**
+ * Тихое автообновление PWA.
+ * Не дергаем update() на каждый focus — вместе с pull-to-refresh это давало
+ * бесконечные reload на телефоне.
+ */
 export function UpdateBanner() {
   useRegisterSW({
     immediate: true,
@@ -10,15 +15,20 @@ export function UpdateBanner() {
       if (!registration) return
 
       const check = () => {
+        // Не чаще раза в несколько секунд — защита от update-шторма
+        const now = Date.now()
+        const last = Number(sessionStorage.getItem(RELOAD_GUARD_KEY) || 0)
+        if (now - last < 8_000) return
         void registration.update().catch(() => {})
       }
 
       window.setInterval(check, CHECK_MS)
-      const onVisible = () => {
-        if (document.visibilityState === 'visible') check()
-      }
-      document.addEventListener('visibilitychange', onVisible)
-      window.addEventListener('focus', check)
+    },
+    onNeedRefresh() {
+      const now = Date.now()
+      const last = Number(sessionStorage.getItem(RELOAD_GUARD_KEY) || 0)
+      if (now - last < 8_000) return
+      sessionStorage.setItem(RELOAD_GUARD_KEY, String(now))
     },
   })
 

@@ -276,11 +276,6 @@ export default function App() {
           players={state.players}
           summary={state.lastRoundSummary}
           finished={partyFinished}
-          nextArtistName={
-            !partyFinished
-              ? state.players[state.artistIndex + 1]?.name
-              : undefined
-          }
           onNext={() => dispatch({ type: 'NEXT_ARTIST' })}
           onHome={goHomeFresh}
           onRematch={() => dispatch({ type: 'REMATCH' })}
