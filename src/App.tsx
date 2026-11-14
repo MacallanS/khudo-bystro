@@ -92,17 +92,13 @@ export default function App() {
       })
       pendingWordsRef.current = words
       const engine = await prepareNarrator(onProgress)
-      // Prefetch только для Silero/Piper; native не нужен. Не блокируем ready на весь раунд.
+      // Prefetch wav заранее: на Pages Silero — готовые файлы, лучше прогреть весь раунд.
       if (engine === 'silero' || engine === 'piper') {
-        const head = [
-          ...ruCardinalsUpTo(Math.min(8, words.length)),
-          ...words.slice(0, 8),
-        ]
+        const all = [...ruCardinalsUpTo(words.length), ...words]
+        const head = all.slice(0, 12)
+        const rest = all.slice(12)
         await prefetchWords(head)
-        void prefetchWords([
-          ...ruCardinalsUpTo(words.length).slice(8),
-          ...words.slice(8),
-        ])
+        void prefetchWords(rest)
       }
       return engine
     },

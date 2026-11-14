@@ -4,19 +4,17 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ruCardinal } from '../game/ruNumbers'
 import {
   GAP_MS,
-  pauseSpeaking,
   prefetchWords,
   randomGap,
-  resumeSpeaking,
   speakWord,
   stopSpeaking,
   wait,
   waitInterruptible,
 } from '../game/tts'
+import type { DrawMode, Slot, Speed } from '../game/types'
 
 /** Пауза между номером и словом — всегда одна, не зависит от скорости */
 const NUMBER_WORD_GAP_MS = 280
-import type { DrawMode, Slot, Speed } from '../game/types'
 
 type Props = {
   slot: Slot
@@ -51,6 +49,9 @@ export function RoundScreen({
   const onCompleteRef = useRef(onComplete)
   const pausedRef = useRef(false)
   const finishedRef = useRef(false)
+  const statusRef = useRef<'speak' | 'gap'>('speak')
+  /** Речь слота оборвали паузой — после снятия повторяем номер+слово */
+  const speechAbortRef = useRef(false)
   onCompleteRef.current = onComplete
   pausedRef.current = paused
 
@@ -64,10 +65,12 @@ export function RoundScreen({
 
   useEffect(() => {
     const onVis = () => {
-      if (document.hidden) {
-        pausedRef.current = true
-        setPaused(true)
-        pauseSpeaking()
+      if (!document.hidden) return
+      pausedRef.current = true
+      setPaused(true)
+      if (statusRef.current === 'speak') {
+        speechAbortRef.current = true
+        stopSpeaking()
       }
     }
     document.addEventListener('visibilitychange', onVis)
@@ -77,43 +80,88 @@ export function RoundScreen({
   useEffect(() => {
     draftUrl.current = undefined
     finishedRef.current = false
+    speechAbortRef.current = false
+    statusRef.current = 'speak'
     setStatus('speak')
     setTtsError(false)
     let cancelled = false
 
     const done = () => cancelled || finishedRef.current
 
+    const waitWhilePaused = async () => {
+      while (pausedRef.current) {
+        if (done()) return
+        await wait(80)
+      }
+    }
+
+    const speakAborted = () =>
+      done() || speechAbortRef.current || pausedRef.current
+
     const run = async () => {
-      while (pausedRef.current) {
+      // Повторяем озвучку слота, пока пауза не оборвёт речь
+      for (;;) {
+        speechAbortRef.current = false
+        await waitWhilePaused()
         if (done()) return
-        await waitInterruptible(120, {
-          isPaused: () => false,
-          isCancelled: () => done(),
-        })
+
+        statusRef.current = 'speak'
+        setStatus('speak')
+        const say = async (text: string) => {
+          try {
+            await speakWord(text, speed, { isCancelled: speakAborted })
+          } catch {
+            if (speakAborted()) throw new Error('aborted')
+            await wait(150)
+            if (speakAborted()) throw new Error('aborted')
+            await speakWord(text, speed, { isCancelled: speakAborted })
+          }
+        }
+        try {
+          await say(ruCardinal(index + 1))
+          if (done()) return
+          if (speechAbortRef.current || pausedRef.current) {
+            await waitWhilePaused()
+            if (done()) return
+            continue
+          }
+
+          const mid = await waitInterruptible(NUMBER_WORD_GAP_MS, {
+            isPaused: () => pausedRef.current,
+            isCancelled: () => done() || speechAbortRef.current,
+          })
+          if (done() || mid === 'cancelled') return
+          if (speechAbortRef.current) {
+            await waitWhilePaused()
+            if (done()) return
+            continue
+          }
+
+          await say(slot.word)
+          if (done()) return
+          if (speechAbortRef.current || pausedRef.current) {
+            await waitWhilePaused()
+            if (done()) return
+            continue
+          }
+          break
+        } catch {
+          if (!done() && !speakAborted()) setTtsError(true)
+          if (speechAbortRef.current || pausedRef.current) {
+            await waitWhilePaused()
+            if (done()) return
+            continue
+          }
+          break
+        }
       }
+
       if (done()) return
 
-      setStatus('speak')
-      try {
-        await speakWord(ruCardinal(index + 1), speed, { isCancelled: done })
-        if (done()) return
-        await wait(NUMBER_WORD_GAP_MS)
-        if (done()) return
-        await speakWord(slot.word, speed, { isCancelled: done })
-      } catch {
-        if (!done()) setTtsError(true)
-      }
+      await waitWhilePaused()
       if (done()) return
 
-      while (pausedRef.current) {
-        if (done()) return
-        await waitInterruptible(120, {
-          isPaused: () => false,
-          isCancelled: () => done(),
-        })
-      }
-      if (done()) return
-
+      statusRef.current = 'gap'
       setStatus('gap')
       const budget = speed === 'chaos' ? randomGap() : GAP_MS[speed]
       setGapBudget(budget)
@@ -144,8 +192,10 @@ export function RoundScreen({
     setPaused((prev) => {
       const next = !prev
       pausedRef.current = next
-      if (next) pauseSpeaking()
-      else resumeSpeaking()
+      if (next && statusRef.current === 'speak') {
+        speechAbortRef.current = true
+        stopSpeaking()
+      }
       return next
     })
   }
@@ -160,7 +210,10 @@ export function RoundScreen({
     onBack()
   }
 
-  const gapPct = Math.max(0, Math.min(100, (gapLeft / Math.max(gapBudget, 1)) * 100))
+  const gapPct = Math.max(
+    0,
+    Math.min(100, (gapLeft / Math.max(gapBudget, 1)) * 100),
+  )
   const listening = status === 'speak' && !paused
   const label = paused
     ? 'На паузе'
@@ -201,9 +254,7 @@ export function RoundScreen({
         }`}
       >
         {ttsError && (
-          <p className="hint stage-hint">
-            Голос не ответил — проверь звук
-          </p>
+          <p className="hint stage-hint">Голос не ответил — проверь звук</p>
         )}
         <p className="word-label">{label}</p>
         <p
