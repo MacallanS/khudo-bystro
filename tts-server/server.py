@@ -9,17 +9,21 @@ import io
 import os
 import ssl
 import sys
+import threading
 import time
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 import torch
 
+from stress import mark_stress
+from shape import SHAPES, shape_word
+
 PORT = int(os.environ.get("TTS_PORT", "9899"))
-SAMPLE_RATE = int(os.environ.get("TTS_SR", "24000"))
+SAMPLE_RATE = int(os.environ.get("TTS_SR", "48000"))
 DEFAULT_VOICE = os.environ.get("TTS_VOICE", "aidar")
 VOICES = ("aidar", "baya", "kseniya", "xenia", "eugene")
 
@@ -145,20 +149,76 @@ def float_to_wav(audio: np.ndarray, sr: int) -> bytes:
     return buf.getvalue()
 
 
+_synth_lock = threading.Lock()
+
+
+def speakable(text: str) -> tuple[str, bool]:
+    """Точка в конце, чтобы модель договорила последний слог.
+
+    Для слов игры ударение стоит вручную: автоударение съедает «ын» в «дыне»
+    и читает «г» в «гвозде» как «х».
+    """
+    text = " ".join(text.split()).lower()
+    phrase, manual = mark_stress(text)
+    if phrase and phrase[-1] not in ".!?…":
+        phrase += "."
+    return phrase, manual
+
+
+def _reset_model_state() -> None:
+    modules = getattr(model, "modules", None)
+    if not callable(modules):
+        return
+    for module in modules():
+        reset = getattr(module, "reset_states", None)
+        if not callable(reset):
+            continue
+        try:
+            reset()
+        except Exception:
+            pass
+
+
 def synthesize(text: str, voice: str) -> bytes:
     speaker = voice if voice in VOICES else DEFAULT_VOICE
-    with torch.inference_mode():
-        audio = model.apply_tts(
-            text=text,
-            speaker=speaker,
-            sample_rate=SAMPLE_RATE,
-            put_accent=True,
-            put_yo=True,
-        )
-    if hasattr(audio, "detach"):
-        arr = audio.detach().cpu().numpy()
+    clean = " ".join(text.split()).lower()
+    shaped = clean in SHAPES
+    if shaped:
+        phrase, manual = SHAPES[clean], True
     else:
-        arr = np.asarray(audio, dtype=np.float32)
+        phrase, manual = speakable(clean)
+    with _synth_lock:
+        with torch.inference_mode():
+            audio = model.apply_tts(
+                text=phrase,
+                speaker=speaker,
+                sample_rate=SAMPLE_RATE,
+                # Своё «+» не отдаём автоударению — оно переставляет удар и смазывает согласные.
+                put_accent=not manual,
+                put_yo=True,
+            )
+        if hasattr(audio, "detach"):
+            arr = np.array(audio.detach().cpu().numpy(), dtype=np.float32, copy=True)
+        else:
+            arr = np.array(audio, dtype=np.float32, copy=True)
+        if shaped:
+            shaped_arr = shape_word(clean, arr, SAMPLE_RATE)
+            # Если «а» в «гриба» не отделилась, не говорим «гриба» — оставляем обычное «гриб».
+            if clean == "гриб" and shaped_arr is arr:
+                audio = model.apply_tts(
+                    text="гр+иб.",
+                    speaker=speaker,
+                    sample_rate=SAMPLE_RATE,
+                    put_accent=False,
+                    put_yo=True,
+                )
+                if hasattr(audio, "detach"):
+                    arr = np.array(audio.detach().cpu().numpy(), dtype=np.float32, copy=True)
+                else:
+                    arr = np.array(audio, dtype=np.float32, copy=True)
+            else:
+                arr = shaped_arr
+        _reset_model_state()
     return float_to_wav(arr, SAMPLE_RATE)
 
 
@@ -229,7 +289,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    # Один поток: Silero не умеет параллельный apply_tts.
+    HTTPServer.allow_reuse_address = True
+    httpd = HTTPServer(("127.0.0.1", PORT), Handler)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

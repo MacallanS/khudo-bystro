@@ -26,11 +26,11 @@ export function CanvasDraw({ onChange, disabled }: Props) {
       canvas.style.width = `${w}px`
       canvas.style.height = `${h}px`
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.fillStyle = '#f7f1e8'
+      ctx.fillStyle = '#fffdf8'
       ctx.fillRect(0, 0, w, h)
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
-      ctx.strokeStyle = '#1a1f2c'
+      ctx.strokeStyle = '#182033'
       ctx.lineWidth = 3.5
     }
 

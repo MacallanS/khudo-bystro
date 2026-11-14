@@ -9,6 +9,10 @@ type Props = {
   artist: Player
   asker: Player
   players: Player[]
+  askerCount: number
+  quizRounds: number
+  quizAsksDone: number
+  quizAskTarget: number
   selectedSlotIndex: number | null
   revealWord: string | null
   onSelect: (index: number) => void
@@ -23,6 +27,10 @@ export function QuizScreen({
   artist,
   asker,
   players,
+  askerCount,
+  quizRounds,
+  quizAsksDone,
+  quizAskTarget,
   selectedSlotIndex,
   revealWord,
   onSelect,
@@ -30,8 +38,12 @@ export function QuizScreen({
   onClearReveal,
   onLeave,
 }: Props) {
-  const remaining = slots.filter((s) => !s.answered).length
   const selected = selectedSlotIndex != null ? slots[selectedSlotIndex] : null
+  const asksLeft = Math.max(0, quizAskTarget - quizAsksDone)
+  const currentRound = Math.min(
+    quizRounds,
+    Math.floor(quizAsksDone / Math.max(askerCount, 1)) + 1,
+  )
   const [confirmLeave, setConfirmLeave] = useState(false)
   const [passFlash, setPassFlash] = useState(true)
   const prevAsker = useRef(asker.id)
@@ -66,7 +78,9 @@ export function QuizScreen({
         </div>
       )}
 
-      <p className="eyebrow">Викторина · осталось {remaining}</p>
+      <p className="eyebrow">
+        Викторина · круг {currentRound}/{quizRounds} · осталось {asksLeft}
+      </p>
       <h2>
         Спрашивает <span className="accent">{asker.name}</span>
       </h2>
@@ -124,9 +138,9 @@ export function QuizScreen({
 
       {selected && !selected.answered && (
         <div className="answer-bar">
-          <p>
-            Рисунок {selected.index + 1}. {artist.name} назвал правильно?
-          </p>
+          <p className="answer-slot">Рисунок {selected.index + 1}</p>
+          <p className="answer-word">{selected.word}</p>
+          <p>{artist.name} назвал правильно?</p>
           <div className="cta-row">
             <button
               type="button"

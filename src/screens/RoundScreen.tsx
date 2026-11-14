@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CanvasDraw } from '../components/CanvasDraw'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ruCardinal } from '../game/ruNumbers'
 import {
   GAP_MS,
   pauseSpeaking,
@@ -47,11 +48,14 @@ export function RoundScreen({
   onCompleteRef.current = onComplete
   pausedRef.current = paused
 
-  useEffect(() => {
-    void prefetchWords(upcomingWords)
-  }, [upcomingWords])
+  const upcomingKey = upcomingWords.join('\n')
 
-  // автопауза при уходе со вкладки / блокировке экрана
+  useEffect(() => {
+    const words = upcomingKey ? upcomingKey.split('\n') : []
+    const nums = words.map((_, i) => ruCardinal(index + 2 + i))
+    void prefetchWords([...nums, ...words])
+  }, [upcomingKey, index])
+
   useEffect(() => {
     const onVis = () => {
       if (document.hidden) {
@@ -85,7 +89,9 @@ export function RoundScreen({
 
       setStatus('speak')
       try {
-        await speakWord(slot.word, speed)
+        await speakWord(ruCardinal(index + 1), speed, { isCancelled: done })
+        if (done()) return
+        await speakWord(slot.word, speed, { isCancelled: done })
       } catch {
         if (!done()) setTtsError(true)
       }
@@ -123,7 +129,7 @@ export function RoundScreen({
       cancelled = true
       stopSpeaking()
     }
-  }, [slot.index, slot.word, speed, drawMode])
+  }, [slot.index, slot.word, speed, drawMode, index])
 
   const togglePause = () => {
     setPaused((prev) => {
@@ -133,13 +139,6 @@ export function RoundScreen({
       else resumeSpeaking()
       return next
     })
-  }
-
-  const finishNow = () => {
-    if (finishedRef.current) return
-    finishedRef.current = true
-    stopSpeaking()
-    onComplete(drawMode === 'phone' ? draftUrl.current : undefined)
   }
 
   const handleBack = () => {
@@ -153,7 +152,14 @@ export function RoundScreen({
   }
 
   const gapPct = Math.max(0, Math.min(100, (gapLeft / GAP_MS[speed]) * 100))
-  const spinning = status === 'speak' && !paused
+  const listening = status === 'speak' && !paused
+  const label = paused
+    ? 'На паузе'
+    : status === 'speak'
+      ? 'Слушай номер и слово'
+      : 'Рисуй · дальше само'
+  const main =
+    paused ? '||' : status === 'speak' ? '· · ·' : String(Math.ceil(gapLeft / 1000))
 
   return (
     <section className="screen round">
@@ -161,58 +167,52 @@ export function RoundScreen({
         <button type="button" className="back-link" onClick={handleBack}>
           ← Выйти
         </button>
-        <button
-          type="button"
-          className={`btn ghost small ${paused ? 'on-pause' : ''}`}
-          onClick={togglePause}
-        >
-          {paused ? '▶ Продолжить' : '⏸ Пауза'}
-        </button>
       </header>
 
-      <div>
-        <p className="eyebrow">{artistName} · проигрыватель</p>
-        <p className="progress">
-          {index + 1} / {total}
-          {paused ? ' · пауза' : ''}
-        </p>
+      <div className="round-status">
+        <div>
+          <p className="eyebrow">{artistName} · диктант</p>
+          <p className="progress">
+            {index + 1}
+            <span> / {total}</span>
+          </p>
+        </div>
+        <button
+          type="button"
+          className={`pause-toggle ${paused ? 'is-paused' : ''}`}
+          onClick={togglePause}
+        >
+          {paused ? 'Продолжить' : 'Пауза'}
+        </button>
       </div>
 
       <div
-        className={`word-stage audio-only record-deck ${
-          spinning ? 'flash' : ''
-        } ${paused ? 'is-paused' : ''}`}
+        className={`word-stage audio-only ${listening ? 'flash' : ''} ${
+          paused ? 'is-paused' : ''
+        }`}
       >
-        <div className="vinyl" aria-hidden>
-          <span className={spinning ? 'spin' : ''} />
-        </div>
         {ttsError && (
-          <p className="hint" style={{ marginBottom: 8 }}>
-            Голос не ответил — нажми «Дальше» или проверь звук / <code>npm run tts</code>
+          <p className="hint stage-hint">
+            Голос не ответил — проверь звук / <code>npm run tts</code>
           </p>
         )}
-        {paused ? (
-          <>
-            <p className="word-label">На паузе</p>
-            <p className="word listen-pulse">⏸</p>
-          </>
-        ) : status === 'speak' ? (
-          <>
-            <p className="word-label">Слушай — слово не пишется</p>
-            <p className="word listen-pulse">● ● ●</p>
-          </>
-        ) : (
-          <>
-            <p className="word-label">Лист {index + 1} · дальше само</p>
-            <p className="word draw-timer">{Math.ceil(gapLeft / 1000)}</p>
-            <div className="draw-bar" aria-hidden>
-              <span style={{ width: `${gapPct}%` }} />
-            </div>
-          </>
-        )}
+        <p className="word-label">{label}</p>
+        <p
+          className={`word stage-main ${
+            status === 'speak' && !paused ? 'listen-pulse' : ''
+          } ${status === 'gap' && !paused ? 'draw-timer' : ''}`}
+        >
+          {main}
+        </p>
+        <div
+          className={`draw-bar ${status === 'gap' && !paused ? '' : 'draw-bar-hidden'}`}
+          aria-hidden
+        >
+          <span style={{ width: `${status === 'gap' ? gapPct : 0}%` }} />
+        </div>
       </div>
 
-      {drawMode === 'phone' ? (
+      {drawMode === 'phone' && (
         <CanvasDraw
           key={slot.index}
           disabled={paused}
@@ -220,26 +220,7 @@ export function RoundScreen({
             draftUrl.current = url
           }}
         />
-      ) : (
-        <div className="paper-slot">
-          <div className="paper-number">{index + 1}</div>
-          <p>
-            Лист {index + 1}
-            {index + 1 < total
-              ? ` → дальше ${index + 2}`
-              : ' · последний'}
-          </p>
-        </div>
       )}
-
-      <div className="player-controls">
-        <button type="button" className="btn ghost" onClick={finishNow}>
-          {index + 1 >= total ? 'К викторине' : 'Дальше →'}
-        </button>
-        <button type="button" className="btn primary" onClick={togglePause}>
-          {paused ? 'Продолжить' : 'Пауза'}
-        </button>
-      </div>
 
       <ConfirmDialog
         open={confirmLeave}

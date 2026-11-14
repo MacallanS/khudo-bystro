@@ -1,14 +1,24 @@
-import { useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { InstallBanner } from './components/InstallBanner'
+import { UpdateBanner } from './components/UpdateBanner'
 import {
+  askersFor,
   canResumeParty,
   createInitialState,
   currentAsker,
   gameReducer,
+  quizPlan,
   sanitizeParty,
 } from './game/reducer'
+import { ruCardinalsUpTo } from './game/ruNumbers'
 import { pickWords } from './game/words'
-import { prefetchWords, unlockSpeech, warmUpVoices } from './game/tts'
+import {
+  prepareNarrator,
+  prefetchWords,
+  stopSpeaking,
+  warmUpVoices,
+  type NarratorEngine,
+} from './game/tts'
 import { initInstallCapture } from './pwa/install'
 import { clearParty, loadParty, saveParty } from './pwa/persist'
 import {
@@ -32,6 +42,7 @@ export default function App() {
     if (!raw || !canResumeParty(raw)) return null
     return sanitizeParty(raw)
   })
+  const pendingWordsRef = useRef<string[]>([])
 
   useEffect(() => {
     warmUpVoices()
@@ -62,19 +73,40 @@ export default function App() {
 
   const artist = state.players[state.artistIndex]
   const asker = currentAsker(state)
+  const quiz = useMemo(
+    () => quizPlan(state.players.length, state.slots.length || state.settings.wordCount),
+    [state.players.length, state.slots.length, state.settings.wordCount],
+  )
   const names = useMemo(
     () => (state.players.length ? state.players.map((p) => p.name) : ['', '']),
     [state.players],
   )
 
-  const startRound = async (onProgress: (pct: number) => void) => {
-    const used = state.slots.map((s) => s.word)
-    const words = pickWords(state.settings.wordCount, used)
-    await unlockSpeech(onProgress)
-    void prefetchWords(words)
+  const prepareRound = useCallback(
+    async (onProgress: (pct: number) => void): Promise<NarratorEngine> => {
+      const used = state.slots.map((s) => s.word)
+      const words = pickWords(state.settings.wordCount, used)
+      pendingWordsRef.current = words
+      const engine = await prepareNarrator(onProgress)
+      await prefetchWords([
+        ...ruCardinalsUpTo(Math.min(words.length, 6)),
+        ...words.slice(0, 6),
+      ])
+      return engine
+    },
+    [state.slots, state.settings.wordCount],
+  )
+
+  const beginRound = useCallback(async () => {
+    stopSpeaking()
+    const words = pendingWordsRef.current
+    if (!words.length) {
+      const used = state.slots.map((s) => s.word)
+      pendingWordsRef.current = pickWords(state.settings.wordCount, used)
+    }
     await requestWakeLock()
-    dispatch({ type: 'BEGIN_ROUND', words })
-  }
+    dispatch({ type: 'BEGIN_ROUND', words: pendingWordsRef.current })
+  }, [state.slots, state.settings.wordCount])
 
   const partyFinished =
     state.phase === 'finished' ||
@@ -93,6 +125,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <UpdateBanner />
       <InstallBanner />
 
       {state.phase === 'home' && (
@@ -143,7 +176,8 @@ export default function App() {
           drawMode={state.settings.drawMode}
           speed={state.settings.speed}
           artistsDone={state.artistsDone}
-          onStart={startRound}
+          onPrepare={prepareRound}
+          onBegin={beginRound}
           onBack={() => dispatch({ type: 'GO_LOBBY' })}
         />
       )}
@@ -157,7 +191,7 @@ export default function App() {
           speed={state.settings.speed}
           artistName={artist.name}
           upcomingWords={state.slots
-            .slice(state.currentSlotIndex, state.currentSlotIndex + 6)
+            .slice(state.currentSlotIndex + 1, state.currentSlotIndex + 6)
             .map((s) => s.word)}
           onComplete={(dataUrl) =>
             dispatch({ type: 'COMPLETE_SLOT', dataUrl })
@@ -173,6 +207,10 @@ export default function App() {
           artist={artist}
           asker={asker}
           players={state.players}
+          askerCount={askersFor(state).length || quiz.askers}
+          quizRounds={quiz.rounds}
+          quizAsksDone={state.quizAsksDone}
+          quizAskTarget={state.quizAskTarget || quiz.target}
           selectedSlotIndex={state.selectedSlotIndex}
           revealWord={state.revealWord}
           onSelect={(index) => dispatch({ type: 'SELECT_SLOT', index })}
@@ -182,7 +220,6 @@ export default function App() {
         />
       )}
 
-      {/* страховка: викторина без asker */}
       {state.phase === 'quiz' && artist && !asker && (
         <section className="screen">
           <p className="hint">Нужно минимум 2 игрока.</p>

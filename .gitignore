@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 tts-server/models/
+tts-server/__pycache__/
 dev-dist/
 
 # Editor directories and files

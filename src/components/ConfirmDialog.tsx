@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom'
+
 type Props = {
   open: boolean
   title: string
@@ -19,9 +21,9 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
-  if (!open) return null
+  if (!open || typeof document === 'undefined') return null
 
-  return (
+  return createPortal(
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
       <div
         className="modal-card"
@@ -45,6 +47,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

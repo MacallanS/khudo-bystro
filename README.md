@@ -6,12 +6,13 @@
 
 На GitHub Pages диктор: **Piper** (в браузере) → Google. Silero доступен только локально через `npm run tts`.
 
-Деплой: ветка `gh-pages` (Actions сейчас недоступны из‑за billing на аккаунте). Обновить сайт:
+Деплой: ветка `gh-pages` (Actions сейчас недоступны из‑за billing на аккаунте):
 
 ```bash
-npm run build
-# затем выложить содержимое dist/ в ветку gh-pages (с .nojekyll)
+npm run deploy:pages
 ```
+
+В браузере и установленной PWA при новой версии появляется баннер «Обновить».
 
 ## Запуск
 

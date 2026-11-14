@@ -13,6 +13,16 @@ const DEFAULT_SETTINGS: GameSettings = {
   wordCount: 25,
 }
 
+export function quizPlan(
+  playerCount: number,
+  wordCount: number,
+): { askers: number; rounds: number; target: number } {
+  const askers = Math.max(1, playerCount - 1)
+  const rounds = Math.max(3, askers)
+  const target = Math.min(Math.max(1, wordCount), askers * rounds)
+  return { askers, rounds, target }
+}
+
 export function createInitialState(): GameState {
   return {
     phase: 'home',
@@ -26,6 +36,8 @@ export function createInitialState(): GameState {
     slots: [],
     currentSlotIndex: 0,
     askerTurn: 0,
+    quizAskTarget: 0,
+    quizAsksDone: 0,
     selectedSlotIndex: null,
     revealWord: null,
     lastRoundSummary: null,
@@ -131,6 +143,16 @@ export function sanitizeParty(raw: GameState): GameState {
     if (artistsDone >= players.length) phase = 'finished'
   }
 
+  const plan = quizPlan(players.length, settings.wordCount)
+  const answered = slots.filter((s) => s.answered).length
+  const quizAskTarget =
+    slots.length > 0 ? Math.min(plan.target, slots.length) : plan.target
+  const quizAsksDone = Math.min(quizAskTarget, answered)
+
+  if (phase === 'quiz' && quizAskTarget > 0 && quizAsksDone >= quizAskTarget) {
+    phase = 'score'
+  }
+
   return {
     phase,
     players,
@@ -140,6 +162,8 @@ export function sanitizeParty(raw: GameState): GameState {
     slots,
     currentSlotIndex: 0,
     askerTurn: Math.max(0, Number(raw.askerTurn) || 0),
+    quizAskTarget,
+    quizAsksDone,
     selectedSlotIndex: null,
     revealWord: null,
     lastRoundSummary: raw.lastRoundSummary ?? null,
@@ -157,12 +181,15 @@ function completeSlot(
   )
   const next = state.currentSlotIndex + 1
   if (next >= slots.length) {
+    const plan = quizPlan(state.players.length, state.settings.wordCount)
     return {
       ...state,
       phase: 'quiz',
       slots,
       currentSlotIndex: slots.length,
       askerTurn: 0,
+      quizAskTarget: Math.min(plan.target, slots.length),
+      quizAsksDone: 0,
       selectedSlotIndex: null,
       revealWord: null,
     }
@@ -197,6 +224,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         artistsDone: 0,
         players: state.players.map((p) => ({ ...p, score: 0 })),
         askerTurn: 0,
+        quizAskTarget: 0,
+        quizAsksDone: 0,
       }
 
     case 'SET_PLAYERS': {
@@ -234,6 +263,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         slots: [],
         currentSlotIndex: 0,
         askerTurn: 0,
+        quizAskTarget: 0,
+        quizAsksDone: 0,
         selectedSlotIndex: null,
         revealWord: null,
         lastRoundSummary: null,
@@ -247,12 +278,15 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         word,
         answered: false,
       }))
+      const plan = quizPlan(state.players.length, slots.length)
       return {
         ...state,
         phase: 'round',
         slots,
         currentSlotIndex: 0,
         askerTurn: 0,
+        quizAskTarget: plan.target,
+        quizAsksDone: 0,
         selectedSlotIndex: null,
         revealWord: null,
         lastRoundSummary: null,
@@ -266,6 +300,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         slots: [],
         currentSlotIndex: 0,
         askerTurn: 0,
+        quizAskTarget: 0,
+        quizAsksDone: 0,
         selectedSlotIndex: null,
         revealWord: null,
         lastRoundSummary: null,
@@ -284,17 +320,21 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
     case 'SKIP_SLOT':
       return completeSlot(state, action.dataUrl)
 
-    case 'FINISH_DRAWING':
+    case 'FINISH_DRAWING': {
       if (!state.slots.length) {
         return { ...state, phase: 'ready' }
       }
+      const plan = quizPlan(state.players.length, state.slots.length)
       return {
         ...state,
         phase: 'quiz',
         askerTurn: 0,
+        quizAskTarget: Math.min(plan.target, state.slots.length),
+        quizAsksDone: 0,
         selectedSlotIndex: null,
         revealWord: null,
       }
+    }
 
     case 'SELECT_SLOT':
       if (state.slots[action.index]?.answered) return state
@@ -332,23 +372,33 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         return p
       })
 
-      const remaining = slots.filter((s) => !s.answered).length
+      const unanswered = slots.filter((s) => !s.answered).length
       const askers = players.filter((p) => p.id !== artist.id)
       const nextAskerTurn = (state.askerTurn + 1) % Math.max(askers.length, 1)
+      const quizAsksDone = state.quizAsksDone + 1
+      const plan = quizPlan(players.length, slots.length)
+      const quizAskTarget = Math.min(
+        state.quizAskTarget || plan.target,
+        slots.length,
+      )
+      const quizDone = quizAsksDone >= quizAskTarget || unanswered === 0
 
-      if (remaining === 0) {
-        const correct = slots.filter((s) => s.correct).length
+      if (quizDone) {
+        const answeredSlots = slots.filter((s) => s.answered)
+        const correct = answeredSlots.filter((s) => s.correct).length
         return {
           ...state,
           phase: 'score',
           players,
           slots,
+          quizAskTarget,
+          quizAsksDone,
           selectedSlotIndex: null,
           revealWord: action.correct ? null : slots[slotIndex].word,
           askerTurn: nextAskerTurn,
           lastRoundSummary: {
             correct,
-            missed: slots.length - correct,
+            missed: answeredSlots.length - correct,
           },
           artistsDone: state.artistsDone + 1,
         }
@@ -358,6 +408,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         ...state,
         players,
         slots,
+        quizAskTarget,
+        quizAsksDone,
         selectedSlotIndex: null,
         revealWord: action.correct ? null : slots[slotIndex].word,
         askerTurn: nextAskerTurn,
@@ -382,6 +434,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         slots: [],
         currentSlotIndex: 0,
         askerTurn: 0,
+        quizAskTarget: 0,
+        quizAsksDone: 0,
         selectedSlotIndex: null,
         revealWord: null,
         lastRoundSummary: null,
@@ -393,6 +447,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         ...state,
         phase: 'finished',
         slots: [],
+        quizAskTarget: 0,
+        quizAsksDone: 0,
         selectedSlotIndex: null,
         revealWord: null,
       }
@@ -407,6 +463,8 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         slots: [],
         currentSlotIndex: 0,
         askerTurn: 0,
+        quizAskTarget: 0,
+        quizAsksDone: 0,
         selectedSlotIndex: null,
         revealWord: null,
         lastRoundSummary: null,

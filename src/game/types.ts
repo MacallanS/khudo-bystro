@@ -41,6 +41,8 @@ export interface GameState {
   slots: Slot[]
   currentSlotIndex: number
   askerTurn: number
+  quizAskTarget: number
+  quizAsksDone: number
   selectedSlotIndex: number | null
   revealWord: string | null
   lastRoundSummary: { correct: number; missed: number } | null

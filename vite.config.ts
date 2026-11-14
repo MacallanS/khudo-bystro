@@ -9,14 +9,14 @@ export default defineConfig({
     react(),
     ttsProxyPlugin(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'pwa-192.png', 'pwa-512.png', 'pwa-512-maskable.png'],
       manifest: {
         name: 'Худо Быстро',
         short_name: 'Худо Быстро',
         description: 'Быстрый диктант, каракули и проверка памяти для компании',
-        theme_color: '#141821',
-        background_color: '#141821',
+        theme_color: '#e7ebf0',
+        background_color: '#e7ebf0',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '.',
@@ -45,6 +45,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,json,wasm}'],
         // ort WASM ~14 MB — default Workbox limit is 2 MB
         maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
+        cleanupOutdatedCaches: true,
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
