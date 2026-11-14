@@ -27,5 +27,6 @@ dev-dist/
 *.sw?
 
 tts-out.mp3
+public/tts/
 public/_icon-preview/
 scripts/_icon-preview/

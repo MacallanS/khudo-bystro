@@ -127,16 +127,49 @@ function localTtsUrl(word: string): string {
   return `/api/tts?q=${encodeURIComponent(word)}&voice=eugene&v=6`
 }
 
+/** Ключ файла = normalizeRuWord + пробелы → `_` (как в tts-server/bake.py). */
+function bakedSlug(word: string): string {
+  const key = normalizeRuWord(word) || word.trim().toLowerCase()
+  return key.replace(/\s+/g, '_')
+}
+
+function bakedTtsUrl(word: string): string {
+  const slug = bakedSlug(word)
+  const base = import.meta.env.BASE_URL || '/'
+  return `${base}tts/eugene/${encodeURIComponent(slug)}.wav`
+}
+
 async function fetchToObjectUrl(
   url: string,
   signal?: AbortSignal,
+  engineHint?: string,
 ): Promise<{ src: string; engine: string }> {
   const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`tts ${res.status}`)
-  const engine = res.headers.get('X-TTS-Engine') || 'proxy'
+  const engine =
+    res.headers.get('X-TTS-Engine') || engineHint || 'proxy'
   const blob = await res.blob()
   if (!blob.size) throw new Error('tts empty')
+  // SPA fallback sometimes returns HTML for missing files
+  const type = (res.headers.get('content-type') || blob.type || '').toLowerCase()
+  if (type.includes('text/html')) throw new Error('tts html')
   return { src: URL.createObjectURL(blob), engine }
+}
+
+async function fetchSileroAudio(
+  word: string,
+  signal?: AbortSignal,
+): Promise<{ src: string; engine: string }> {
+  try {
+    return await fetchToObjectUrl(bakedTtsUrl(word), signal, 'silero')
+  } catch {
+    const { src, engine } = await fetchToObjectUrl(localTtsUrl(word), signal)
+    if (engine !== 'silero' && engine !== 'proxy') {
+      URL.revokeObjectURL(src)
+      throw new Error('not silero')
+    }
+    return { src, engine: 'silero' }
+  }
 }
 
 async function ensurePiper(onProgress?: (pct: number) => void): Promise<void> {
@@ -167,7 +200,28 @@ async function synthesizePiper(word: string): Promise<string> {
   return URL.createObjectURL(blob)
 }
 
+async function probeBakedSilero(): Promise<string | null> {
+  const ctrl = new AbortController()
+  const timer = window.setTimeout(() => ctrl.abort(), SILERO_PROBE_MS)
+  try {
+    const { src } = await fetchToObjectUrl(
+      bakedTtsUrl('кот'),
+      ctrl.signal,
+      'silero',
+    )
+    cache.set('кот', src)
+    return src
+  } catch {
+    return null
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
+
 async function probeSilero(): Promise<string | null> {
+  const baked = await probeBakedSilero()
+  if (baked) return baked
+
   const ctrl = new AbortController()
   const timer = window.setTimeout(() => ctrl.abort(), SILERO_PROBE_MS)
   try {
@@ -197,11 +251,7 @@ async function resolveWithEngine(
   if (hit) return hit
 
   if (engine === 'silero') {
-    const { src, engine: got } = await fetchToObjectUrl(localTtsUrl(word))
-    if (got !== 'silero') {
-      URL.revokeObjectURL(src)
-      throw new Error('not silero')
-    }
+    const { src } = await fetchSileroAudio(word)
     cache.set(key, src)
     trimCache()
     return src

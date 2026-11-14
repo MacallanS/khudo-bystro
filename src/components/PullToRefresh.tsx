@@ -28,7 +28,7 @@ async function reloadApp(): Promise<void> {
   window.location.reload()
 }
 
-/** Pull-down refresh like mobile browser — works in standalone PWA. */
+/** Pull-down refresh — только анимация, без подписей. */
 export function PullToRefresh() {
   const [pull, setPull] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
@@ -62,18 +62,19 @@ export function PullToRefresh() {
         setPull(0)
         return
       }
-      // Не даём странице «резиниться» во время жеста
       if (e.cancelable) e.preventDefault()
-      const next = Math.min(MAX_PULL, dy * 0.55)
-      setPull(next)
+      setPull(Math.min(MAX_PULL, dy * 0.55))
     }
 
     const onEnd = () => {
       if (!tracking.current) return
       tracking.current = false
       const amount = pullRef.current
-      setPull(0)
-      if (amount < THRESHOLD || refreshing) return
+      if (amount < THRESHOLD || refreshing) {
+        setPull(0)
+        return
+      }
+      setPull(THRESHOLD)
       setRefreshing(true)
       void reloadApp()
     }
@@ -91,24 +92,26 @@ export function PullToRefresh() {
     }
   }, [refreshing])
 
-  const visible = pull > 8 || refreshing
-  const ready = pull >= THRESHOLD
-  const label = refreshing
-    ? 'Обновляем…'
-    : ready
-      ? 'Отпусти — обновить'
-      : 'Тяни вниз — обновить'
+  const visible = pull > 4 || refreshing
+  const progress = Math.min(1, pull / THRESHOLD)
+  const rotate = refreshing ? undefined : progress * 270
 
   return (
     <div
       className={`ptr-indicator ${visible ? 'is-visible' : ''} ${
-        ready || refreshing ? 'is-ready' : ''
+        refreshing ? 'is-refreshing' : ''
       }`}
-      style={{ '--ptr-pull': `${pull}px` } as CSSProperties}
-      aria-hidden={!visible}
+      style={
+        {
+          '--ptr-y': `${Math.max(pull * 0.55, refreshing ? 28 : 0)}px`,
+          '--ptr-scale': refreshing ? 1 : Math.max(0.35, progress),
+          '--ptr-rotate': refreshing ? '0deg' : `${rotate}deg`,
+          '--ptr-progress': String(progress),
+        } as CSSProperties
+      }
+      aria-hidden
     >
       <span className={`ptr-spinner ${refreshing ? 'is-spin' : ''}`} />
-      <span className="ptr-label">{label}</span>
     </div>
   )
 }

@@ -84,43 +84,52 @@ button {
 /* —— Pull to refresh (PWA / mobile) —— */
 .ptr-indicator {
   position: fixed;
-  top: calc(6px + var(--safe-top));
+  top: calc(8px + var(--safe-top));
   left: 50%;
   z-index: 90;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
   background: var(--paper);
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-weight: 600;
+  box-shadow: 0 2px 10px rgba(24, 32, 51, 0.12);
   pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, calc(-12px + var(--ptr-pull, 0px) * 0.35));
-  transition: opacity 0.15s ease;
+  transform: translate(-50%, calc(-40px + var(--ptr-y, 0px)))
+    scale(var(--ptr-scale, 0.35));
+  transition: opacity 0.12s ease;
+  will-change: transform, opacity;
 }
 
 .ptr-indicator.is-visible {
   opacity: 1;
 }
 
-.ptr-indicator.is-ready {
-  color: var(--ink);
+.ptr-indicator.is-refreshing {
+  transition: transform 0.2s ease, opacity 0.12s ease;
 }
 
 .ptr-spinner {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  border: 2px solid rgba(24, 32, 51, 0.18);
+  border: 2.5px solid rgba(24, 32, 51, 0.14);
   border-top-color: var(--accent);
-  flex: 0 0 auto;
+  transform: rotate(var(--ptr-rotate, 0deg));
+  transition: border-top-color 0.15s ease;
+}
+
+.ptr-indicator.is-visible:not(.is-refreshing) .ptr-spinner {
+  border-top-color: color-mix(
+    in srgb,
+    var(--accent) calc(var(--ptr-progress, 0) * 100%),
+    rgba(24, 32, 51, 0.25)
+  );
 }
 
 .ptr-spinner.is-spin {
-  animation: ptr-spin 0.7s linear infinite;
+  animation: ptr-spin 0.65s linear infinite;
 }
 
 @keyframes ptr-spin {

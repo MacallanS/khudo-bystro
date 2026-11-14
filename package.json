@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "tts": "py -3.12 tts-server/server.py",
+    "tts:bake": "py -3.12 tts-server/bake.py",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "deploy:pages": "npm run build && node scripts/deploy-pages.mjs"
+    "deploy:pages": "npm run tts:bake && npm run build && node scripts/deploy-pages.mjs"
   },
   "dependencies": {
     "@fontsource/manrope": "^5.3.0",

@@ -56,12 +56,26 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // wav/mp3 диктора не в precache — слишком много файлов
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,json,wasm}'],
         // ort WASM ~14 MB — default Workbox limit is 2 MB
         maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/_/, /\/tts\//],
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.includes('/tts/eugene/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'khudo-tts-baked',
+              expiration: {
+                maxEntries: 1500,
+                maxAgeSeconds: 60 * 60 * 24 * 90,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api/tts'),
             handler: 'CacheFirst',
