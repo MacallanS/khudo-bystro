@@ -1,4 +1,5 @@
 import * as piper from '@mintplex-labs/piper-tts-web'
+import { getAudioContext, resumeSfx } from './sfx'
 import type { Speed } from './types'
 
 /**
@@ -37,6 +38,7 @@ export type NarratorEngine = 'silero' | 'piper' | 'google' | 'native'
 export type NarratorStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 let currentAudio: HTMLAudioElement | null = null
+let currentSource: AudioBufferSourceNode | null = null
 let endCurrentPlay: (() => void) | null = null
 let speakGen = 0
 let unlocked = false
@@ -47,7 +49,12 @@ let narratorStatus: NarratorStatus = 'idle'
 let preparePromise: Promise<NarratorEngine> | null = null
 let speakChain: Promise<unknown> = Promise.resolve()
 let prefetchChain: Promise<unknown> = Promise.resolve()
+/** blob: URL — запасной HTMLAudio */
 const cache = new Map<string, string>()
+/** Сырые wav-байты для decode */
+const arrayCache = new Map<string, ArrayBuffer>()
+/** Декодированные буферы — основной путь на телефоне */
+const bufferCache = new Map<string, AudioBuffer>()
 const inflight = new Map<string, Promise<string>>()
 /** Не скатываемся на системный голос из‑за одного битого файла — движок «липкий». */
 let stickyEngine = false
@@ -113,6 +120,20 @@ export function normalizeRuWord(raw: string): string {
 function stopCurrent(): void {
   const end = endCurrentPlay
   endCurrentPlay = null
+  if (currentSource) {
+    try {
+      currentSource.onended = null
+      currentSource.stop()
+    } catch {
+      // already stopped
+    }
+    try {
+      currentSource.disconnect()
+    } catch {
+      // ignore
+    }
+    currentSource = null
+  }
   if (currentAudio) {
     try {
       currentAudio.onended = null
@@ -148,17 +169,21 @@ async function fetchToObjectUrl(
   url: string,
   signal?: AbortSignal,
   engineHint?: string,
-): Promise<{ src: string; engine: string }> {
+): Promise<{ src: string; engine: string; data: ArrayBuffer }> {
   const res = await fetch(url, { signal })
   if (!res.ok) throw new Error(`tts ${res.status}`)
   const engine =
     res.headers.get('X-TTS-Engine') || engineHint || 'proxy'
-  const blob = await res.blob()
-  if (!blob.size) throw new Error('tts empty')
-  // SPA fallback sometimes returns HTML for missing files
-  const type = (res.headers.get('content-type') || blob.type || '').toLowerCase()
+  const type = (res.headers.get('content-type') || '').toLowerCase()
   if (type.includes('text/html')) throw new Error('tts html')
-  return { src: URL.createObjectURL(blob), engine }
+  const data = await res.arrayBuffer()
+  if (!data.byteLength) throw new Error('tts empty')
+  // SPA fallback: HTML page masquerading as 200
+  const head = new Uint8Array(data.slice(0, 16))
+  const asText = String.fromCharCode(...head)
+  if (/^\s*</.test(asText) || asText.includes('<!')) throw new Error('tts html')
+  const blob = new Blob([data], { type: type || 'audio/wav' })
+  return { src: URL.createObjectURL(blob), engine, data }
 }
 
 async function fetchWithTimeout(
@@ -178,25 +203,77 @@ async function fetchWithTimeout(
 async function fetchSileroAudio(
   word: string,
   signal?: AbortSignal,
-): Promise<{ src: string; engine: string }> {
+): Promise<{ src: string; engine: string; data: ArrayBuffer }> {
   const baked = bakedTtsUrl(word)
   try {
     if (signal) return await fetchToObjectUrl(baked, signal, 'silero')
     return await fetchWithTimeout(baked, SILERO_FETCH_MS, 'silero')
   } catch (first) {
-    // Один быстрый повтор — не два длинных таймаута подряд.
     try {
       if (signal?.aborted) throw first
       return await fetchWithTimeout(baked, Math.min(SILERO_FETCH_MS, 3_000), 'silero')
     } catch {
       if (import.meta.env.PROD) throw first
-      const { src, engine } = await fetchToObjectUrl(localTtsUrl(word), signal)
-      if (engine !== 'silero' && engine !== 'proxy') {
-        URL.revokeObjectURL(src)
+      const got = await fetchToObjectUrl(localTtsUrl(word), signal)
+      if (got.engine !== 'silero' && got.engine !== 'proxy') {
+        URL.revokeObjectURL(got.src)
         throw new Error('not silero')
       }
-      return { src, engine: 'silero' }
+      return { src: got.src, engine: 'silero', data: got.data }
     }
+  }
+}
+
+async function decodeToBuffer(
+  key: string,
+  data: ArrayBuffer,
+): Promise<AudioBuffer> {
+  const hit = bufferCache.get(key)
+  if (hit) return hit
+  const ctx = getAudioContext()
+  if (!ctx) throw new Error('no AudioContext')
+  const copy = data.slice(0)
+  const buf = await ctx.decodeAudioData(copy)
+  bufferCache.set(key, buf)
+  return buf
+}
+
+async function storeFetchedAudio(
+  key: string,
+  src: string,
+  data: ArrayBuffer,
+): Promise<string> {
+  cache.set(key, src)
+  arrayCache.set(key, data.slice(0))
+  try {
+    await decodeToBuffer(key, data)
+  } catch {
+    // decode позже в ensureDecoded / speak
+  }
+  trimCache()
+  return src
+}
+
+async function ensureDecoded(key: string): Promise<AudioBuffer | null> {
+  const hit = bufferCache.get(key)
+  if (hit) return hit
+  const data = arrayCache.get(key)
+  if (data) {
+    try {
+      return await decodeToBuffer(key, data)
+    } catch {
+      return null
+    }
+  }
+  const src = cache.get(key)
+  if (!src) return null
+  try {
+    const res = await fetch(src)
+    const ab = await res.arrayBuffer()
+    arrayCache.set(key, ab.slice(0))
+    return await decodeToBuffer(key, ab)
+  } catch {
+    return null
   }
 }
 
@@ -219,13 +296,16 @@ async function ensurePiper(onProgress?: (pct: number) => void): Promise<void> {
   onProgress?.(100)
 }
 
-async function synthesizePiper(word: string): Promise<string> {
+async function synthesizePiper(
+  word: string,
+): Promise<{ src: string; data: ArrayBuffer }> {
   await ensurePiper()
   const blob = await piper.predict({
     text: word,
     voiceId: PIPER_VOICE,
   })
-  return URL.createObjectURL(blob)
+  const data = await blob.arrayBuffer()
+  return { src: URL.createObjectURL(blob), data }
 }
 
 async function probeBakedSilero(): Promise<string | null> {
@@ -233,13 +313,13 @@ async function probeBakedSilero(): Promise<string | null> {
     const ctrl = new AbortController()
     const timer = window.setTimeout(() => ctrl.abort(), SILERO_PROBE_MS)
     try {
-      const { src } = await fetchToObjectUrl(
+      const got = await fetchToObjectUrl(
         bakedTtsUrl('кот'),
         ctrl.signal,
         'silero',
       )
-      cache.set('кот', src)
-      return src
+      await storeFetchedAudio('кот', got.src, got.data)
+      return got.src
     } catch {
       await wait(200 + attempt * 300)
     } finally {
@@ -257,16 +337,13 @@ async function probeSilero(): Promise<string | null> {
   const ctrl = new AbortController()
   const timer = window.setTimeout(() => ctrl.abort(), SILERO_PROBE_MS)
   try {
-    const { src, engine } = await fetchToObjectUrl(
-      localTtsUrl('кот'),
-      ctrl.signal,
-    )
-    if (engine !== 'silero') {
-      URL.revokeObjectURL(src)
+    const got = await fetchToObjectUrl(localTtsUrl('кот'), ctrl.signal)
+    if (got.engine !== 'silero') {
+      URL.revokeObjectURL(got.src)
       return null
     }
-    cache.set('кот', src)
-    return src
+    await storeFetchedAudio('кот', got.src, got.data)
+    return got.src
   } catch {
     return null
   } finally {
@@ -280,28 +357,24 @@ async function resolveWithEngine(
 ): Promise<string> {
   const key = word.toLowerCase()
   const hit = cache.get(key)
-  if (hit) return hit
+  if (hit) {
+    if (!bufferCache.has(key)) void ensureDecoded(key)
+    return hit
+  }
 
   if (engine === 'silero') {
-    const { src } = await fetchSileroAudio(word)
-    cache.set(key, src)
-    trimCache()
-    return src
+    const got = await fetchSileroAudio(word)
+    return storeFetchedAudio(key, got.src, got.data)
   }
 
   if (engine === 'piper') {
-    const src = await synthesizePiper(word)
-    cache.set(key, src)
-    trimCache()
-    return src
+    const got = await synthesizePiper(word)
+    return storeFetchedAudio(key, got.src, got.data)
   }
 
-  // google через локальный proxy (dev); иначе URL часто 403 в Audio
   try {
-    const { src } = await fetchToObjectUrl(localTtsUrl(word))
-    cache.set(key, src)
-    trimCache()
-    return src
+    const got = await fetchToObjectUrl(localTtsUrl(word))
+    return storeFetchedAudio(key, got.src, got.data)
   } catch {
     throw new Error('google tts unavailable')
   }
@@ -370,12 +443,83 @@ async function synthesizeQueued(normalized: string): Promise<string> {
 
 function trimCache(): void {
   // Раунд 40 слов × 2 (номер+слово) + запас — не выкидывать wav посреди диктанта
-  if (cache.size <= 400) return
-  const first = cache.keys().next().value
-  if (!first) return
-  const old = cache.get(first)
-  if (old?.startsWith('blob:')) URL.revokeObjectURL(old)
-  cache.delete(first)
+  while (cache.size > 400) {
+    const first = cache.keys().next().value
+    if (!first) break
+    const old = cache.get(first)
+    if (old?.startsWith('blob:')) URL.revokeObjectURL(old)
+    cache.delete(first)
+    arrayCache.delete(first)
+    bufferCache.delete(first)
+  }
+}
+
+/** Основной путь: Web Audio BufferSource — переживает countdown на телефоне. */
+function playBuffer(
+  buf: AudioBuffer,
+  speed: Speed,
+  gen: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stopCurrent()
+    if (gen !== speakGen) {
+      resolve()
+      return
+    }
+    const ctx = getAudioContext()
+    if (!ctx) {
+      reject(new Error('no AudioContext'))
+      return
+    }
+
+    void (async () => {
+      try {
+        if (ctx.state === 'suspended') await ctx.resume()
+      } catch {
+        // ignore
+      }
+      if (gen !== speakGen) {
+        resolve()
+        return
+      }
+
+      const source = ctx.createBufferSource()
+      const gain = ctx.createGain()
+      source.buffer = buf
+      source.playbackRate.value = PLAYBACK_RATE[speed]
+      gain.gain.value = 1
+      source.connect(gain)
+      gain.connect(ctx.destination)
+      currentSource = source
+
+      let settled = false
+      const settle = (err?: unknown) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timer)
+        if (endCurrentPlay === release) endCurrentPlay = null
+        if (currentSource === source) currentSource = null
+        try {
+          source.disconnect()
+          gain.disconnect()
+        } catch {
+          // ignore
+        }
+        if (err && gen === speakGen) reject(err)
+        else resolve()
+      }
+      const release = () => settle()
+      endCurrentPlay = release
+
+      const timer = window.setTimeout(() => settle(), 12_000)
+      source.onended = () => settle()
+      try {
+        source.start(0)
+      } catch (err) {
+        settle(err)
+      }
+    })()
+  })
 }
 
 function playSrc(src: string, speed: Speed, gen: number): Promise<void> {
@@ -415,16 +559,14 @@ function playSrc(src: string, speed: Speed, gen: number): Promise<void> {
       } catch {
         // ignore
       }
-      // Таймаут без ошибки: слово «проглотили», раунд не рвём native-кашей
       settle()
     }, 12000)
 
     audio.onended = () => settle()
     audio.onerror = () => settle(new Error('audio error'))
     void audio.play().catch(async (err) => {
-      // Автоплей после свёртки вкладки — ещё одна разблокировка
       try {
-        await silentUnlock()
+        await resumeSfx()
         if (gen !== speakGen) {
           settle()
           return
@@ -541,37 +683,23 @@ export function getNarratorStatus(): NarratorStatus {
   return narratorStatus
 }
 
-async function silentUnlock(): Promise<void> {
-  try {
-    const silent = new Audio(
-      'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAbD5cq3bAAAAAAAAAAAAAAAAAAAA/+MYxAAAAANIAAAAAExBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV/+MYxDsAAANIAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV',
-    )
-    silent.volume = 0.01
-    currentAudio = silent
-    await silent.play()
-    silent.pause()
-    if (currentAudio === silent) currentAudio = null
-  } catch {
-    // ignore
-  }
-}
-
-/** Разблокировка Audio / speechSynthesis по жесту пользователя (клик «Начать»). */
+/** Разблокировка Web Audio по жесту (клик «Начать») — HTMLAudio не нужен. */
 export async function armNarrator(): Promise<void> {
   if (typeof window === 'undefined') return
-  await silentUnlock()
   unlocked = true
-  try {
-    if (!window.speechSynthesis) return
-    window.speechSynthesis.cancel()
-    const utter = new SpeechSynthesisUtterance(' ')
-    utter.volume = 0
-    utter.rate = 2
-    utter.lang = 'ru-RU'
-    window.speechSynthesis.speak(utter)
-    window.speechSynthesis.cancel()
-  } catch {
-    // ignore
+  await resumeSfx()
+  const ctx = getAudioContext()
+  if (ctx) {
+    try {
+      // Тихий тик — context остаётся running после countdown
+      const buf = ctx.createBuffer(1, 1, ctx.sampleRate)
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      src.connect(ctx.destination)
+      src.start(0)
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -591,7 +719,8 @@ export async function prepareNarrator(
 
   narratorStatus = 'loading'
   preparePromise = (async () => {
-    await silentUnlock()
+    // Context можно создать заранее; resume — на жесте «Начать»
+    getAudioContext()
     unlocked = true
     await waitForVoices()
     onProgress?.(10)
@@ -608,8 +737,8 @@ export async function prepareNarrator(
     onProgress?.(15)
     try {
       await withTimeout(ensurePiper(onProgress), PIPER_READY_MS)
-      const src = await withTimeout(synthesizePiper('кот'), 12_000)
-      cache.set('кот', src)
+      const got = await withTimeout(synthesizePiper('кот'), 12_000)
+      await storeFetchedAudio('кот', got.src, got.data)
       activeEngine = 'piper'
       stickyEngine = true
       piperReady = true
@@ -657,7 +786,6 @@ export async function speakWord(
   const gen = speakGen
   if (isStale(gen, opts)) return
   stopCurrent()
-  // Не трогаем speechSynthesis, если играем wav — cancel() в Chrome ломает следующий native.
   if (activeEngine === 'native') cancelSystemVoice()
   const text = normalizeRuWord(word) || word.trim()
   if (!text || isStale(gen, opts)) return
@@ -671,13 +799,19 @@ export async function speakWord(
       return
     }
 
-    const src = await resolveAudioSrc(text, 'speak')
+    await resolveAudioSrc(text, 'speak')
     if (isStale(gen, opts)) return
+    const buf = await ensureDecoded(text)
+    if (isStale(gen, opts)) return
+    if (buf) {
+      await playBuffer(buf, speed, gen)
+      return
+    }
+    const src = cache.get(text)
+    if (!src) throw new Error('no audio')
     await playSrc(src, speed, gen)
   } catch (err) {
     if (isStale(gen, opts)) return
-    // На телефоне native часто «кривой» (не тот язык / каша). Если уже Silero/Piper —
-    // не скатываемся, лучше тишина/ошибка слота, чем бред.
     if (
       stickyEngine &&
       (activeEngine === 'silero' || activeEngine === 'piper')
@@ -696,26 +830,39 @@ export async function speakWord(
   }
 }
 
-export async function prefetchWords(
+/** Fetch + decode всех фраз раунда до старта (мобильный Web Audio). */
+export async function prefetchAndDecode(
   words: string[],
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
   if (!unlocked && !activeEngine) return
   if (activeEngine === 'native') return
+  getAudioContext()
   const total = words.length
   for (let i = 0; i < words.length; i++) {
+    const raw = words[i]!
+    const text = normalizeRuWord(raw) || raw.trim().toLowerCase()
     try {
-      await resolveAudioSrc(words[i]!, 'prefetch')
+      if (text) {
+        await resolveAudioSrc(text, 'prefetch')
+        await ensureDecoded(text)
+      }
     } catch {
-      // одно слово не останавливает весь прогрев
+      // одно слово не валит весь прогрев
     }
     onProgress?.(i + 1, total)
   }
 }
 
+export async function prefetchWords(
+  words: string[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
+  return prefetchAndDecode(words, onProgress)
+}
+
 /**
- * Дождаться wav в кэше (speak-приоритет) — без тишины перед озвучкой слота.
- * Для native сразу ok.
+ * Дождаться AudioBuffer в кэше — без тишины перед озвучкой слота.
  */
 export async function ensureReady(
   texts: string[],
@@ -735,9 +882,9 @@ export async function ensureReady(
     if (isStale(gen, opts)) return
     const text = normalizeRuWord(raw) || raw.trim()
     if (!text) continue
-    if (cache.has(text)) continue
     try {
-      await resolveAudioSrc(text, 'speak')
+      if (!cache.has(text)) await resolveAudioSrc(text, 'speak')
+      await ensureDecoded(text)
     } catch {
       // слово скажет speakWord / fallback
     }
@@ -751,22 +898,15 @@ export function stopSpeaking(): void {
 }
 
 export function pauseSpeaking(): void {
-  try {
-    currentAudio?.pause()
-  } catch {
-    // ignore
-  }
+  // Web Audio: пауза = стоп текущего source (повтор слота делает RoundScreen)
+  stopCurrent()
   if (typeof window !== 'undefined' && window.speechSynthesis?.speaking) {
     window.speechSynthesis.pause()
   }
 }
 
 export function resumeSpeaking(): void {
-  try {
-    void currentAudio?.play()
-  } catch {
-    // ignore
-  }
+  void resumeSfx()
   if (typeof window !== 'undefined' && window.speechSynthesis?.paused) {
     window.speechSynthesis.resume()
   }

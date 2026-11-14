@@ -15,7 +15,7 @@ import { dictationPrefetchOrder } from './game/ruNumbers'
 import { pickWords } from './game/words'
 import {
   prepareNarrator,
-  prefetchWords,
+  prefetchAndDecode,
   stopSpeaking,
   warmUpVoices,
   type NarratorEngine,
@@ -115,13 +115,13 @@ export default function App() {
         categories: state.settings.categories,
       })
       pendingWordsRef.current = words
-      // Двигатель ~0–35%, затем полный прогрев раунда 35–100% — дольше старт, без дыр в диктанте.
+      // Двигатель ~0–35%, затем fetch+decode всех пар раунда 35–100%.
       const engine = await prepareNarrator((pct) =>
         onProgress(Math.round(pct * 0.35)),
       )
       if (engine === 'silero' || engine === 'piper') {
         const all = dictationPrefetchOrder(words)
-        await prefetchWords(all, (done, total) => {
+        await prefetchAndDecode(all, (done, total) => {
           const t = Math.max(1, total)
           onProgress(35 + Math.round((done / t) * 65))
         })

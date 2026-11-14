@@ -2,7 +2,8 @@
 
 let ctx: AudioContext | null = null
 
-function getCtx(): AudioContext | null {
+/** Общий AudioContext для SFX и диктора (один resume по жесту). */
+export function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
   if (!ctx) {
     const AC =
@@ -16,7 +17,7 @@ function getCtx(): AudioContext | null {
 }
 
 export async function resumeSfx(): Promise<void> {
-  const c = getCtx()
+  const c = getAudioContext()
   if (!c) return
   if (c.state === 'suspended') {
     try {
@@ -32,7 +33,7 @@ function tone(
   durationSec: number,
   opts?: { type?: OscillatorType; gain?: number; slideTo?: number },
 ): void {
-  const c = getCtx()
+  const c = getAudioContext()
   if (!c) return
   const now = c.currentTime
   const osc = c.createOscillator()
