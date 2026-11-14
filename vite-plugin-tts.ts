@@ -2,7 +2,7 @@ import type { Plugin, PreviewServer, ViteDevServer } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 const SILERO = 'http://127.0.0.1:9899/tts'
-const DEFAULT_VOICE = 'aidar'
+const DEFAULT_VOICE = 'eugene'
 
 async function fetchUpstream(url: string): Promise<Response> {
   return fetch(url, {

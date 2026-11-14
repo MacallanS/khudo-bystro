@@ -1,4 +1,13 @@
-import type { GameAction, GameSettings, GameState, Player, Slot } from './types'
+import type {
+  GameAction,
+  GameSettings,
+  GameState,
+  Player,
+  Slot,
+  Speed,
+  WordCategory,
+  WordCount,
+} from './types'
 
 export const STORAGE_KEY = 'khudo-bystro-party-v1'
 export const MAX_PLAYERS = 8
@@ -11,15 +20,71 @@ const DEFAULT_SETTINGS: GameSettings = {
   drawMode: 'paper',
   speed: 'chaos',
   wordCount: 25,
+  categories: 'all',
 }
 
+const SPEEDS: Speed[] = ['slow', 'normal', 'fast', 'chaos']
+const WORD_COUNTS: WordCount[] = [10, 15, 25, 40]
+const CATEGORY_SET = new Set<string>([
+  'animals',
+  'food',
+  'home',
+  'transport',
+  'nature',
+  'school',
+  'tech',
+  'sport',
+  'clothes',
+  'jobs',
+  'body',
+  'tools',
+  'fantasy',
+  'party',
+  'kitchen',
+  'city',
+])
+
+function sanitizeSettings(raw: GameState['settings'] | undefined): GameSettings {
+  const speed = SPEEDS.includes(raw?.speed as Speed)
+    ? (raw!.speed as Speed)
+    : DEFAULT_SETTINGS.speed
+  const wordCount = WORD_COUNTS.includes(raw?.wordCount as WordCount)
+    ? (raw!.wordCount as WordCount)
+    : DEFAULT_SETTINGS.wordCount
+
+  let categories: GameSettings['categories'] = 'all'
+  if (Array.isArray(raw?.categories)) {
+    const cleaned = raw.categories.filter((c): c is WordCategory =>
+      CATEGORY_SET.has(c),
+    )
+    categories = cleaned.length ? cleaned : 'all'
+  } else if (raw?.categories === 'all') {
+    categories = 'all'
+  }
+
+  return {
+    drawMode: raw?.drawMode === 'phone' ? 'phone' : 'paper',
+    speed,
+    wordCount,
+    categories,
+  }
+}
+
+/** Больше игроков → меньше кругов (4→3, 6→2), вопросов не меньше 8. */
 export function quizPlan(
   playerCount: number,
   wordCount: number,
 ): { askers: number; rounds: number; target: number } {
   const askers = Math.max(1, playerCount - 1)
-  const rounds = Math.max(3, askers)
-  const target = Math.min(Math.max(1, wordCount), askers * rounds)
+  const words = Math.max(1, wordCount)
+  let rounds = Math.max(2, 6 - askers)
+  let target = askers * rounds
+  if (target < 8) {
+    rounds = Math.ceil(8 / askers)
+    target = askers * rounds
+  }
+  target = Math.min(words, target)
+  rounds = Math.max(1, Math.ceil(target / askers))
   return { askers, rounds, target }
 }
 
@@ -84,17 +149,7 @@ export function sanitizeParty(raw: GameState): GameState {
 
   if (players.length < 2) return base
 
-  const settings: GameSettings = {
-    drawMode: raw.settings?.drawMode === 'phone' ? 'phone' : 'paper',
-    speed:
-      raw.settings?.speed === 'slow' || raw.settings?.speed === 'normal'
-        ? raw.settings.speed
-        : 'chaos',
-    wordCount:
-      raw.settings?.wordCount === 10 || raw.settings?.wordCount === 15
-        ? raw.settings.wordCount
-        : 25,
-  }
+  const settings = sanitizeSettings(raw.settings)
 
   let phase = raw.phase
   if (
@@ -394,7 +449,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
           quizAskTarget,
           quizAsksDone,
           selectedSlotIndex: null,
-          revealWord: action.correct ? null : slots[slotIndex].word,
+          revealWord: null,
           askerTurn: nextAskerTurn,
           lastRoundSummary: {
             correct,
@@ -411,7 +466,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         quizAskTarget,
         quizAsksDone,
         selectedSlotIndex: null,
-        revealWord: action.correct ? null : slots[slotIndex].word,
+        revealWord: null,
         askerTurn: nextAskerTurn,
       }
     }

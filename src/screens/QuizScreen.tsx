@@ -14,10 +14,8 @@ type Props = {
   quizAsksDone: number
   quizAskTarget: number
   selectedSlotIndex: number | null
-  revealWord: string | null
   onSelect: (index: number) => void
   onAnswer: (correct: boolean) => void
-  onClearReveal: () => void
   onLeave: () => void
 }
 
@@ -32,10 +30,8 @@ export function QuizScreen({
   quizAsksDone,
   quizAskTarget,
   selectedSlotIndex,
-  revealWord,
   onSelect,
   onAnswer,
-  onClearReveal,
   onLeave,
 }: Props) {
   const selected = selectedSlotIndex != null ? slots[selectedSlotIndex] : null
@@ -91,15 +87,6 @@ export function QuizScreen({
 
       <ScorePeek players={players} compact />
 
-      {revealWord && (
-        <div className="reveal" role="status">
-          Было: <strong>{revealWord}</strong>
-          <button type="button" className="btn ghost small" onClick={onClearReveal}>
-            Ок
-          </button>
-        </div>
-      )}
-
       <div className="slot-grid">
         {slots.map((slot) => (
           <button
@@ -118,21 +105,29 @@ export function QuizScreen({
               onSelect(slot.index)
             }}
           >
-            {drawMode === 'phone' && slot.drawingDataUrl ? (
+            {slot.answered ? (
+              <>
+                {drawMode === 'phone' && slot.drawingDataUrl ? (
+                  <img
+                    src={slot.drawingDataUrl}
+                    alt={`Рисунок ${slot.index + 1}`}
+                  />
+                ) : null}
+                <span className="slot-word">{slot.word}</span>
+                <span className={`mark ${slot.correct ? 'ok' : 'bad'}`}>
+                  {slot.correct ? '✓' : '×'}
+                </span>
+              </>
+            ) : drawMode === 'phone' && slot.drawingDataUrl ? (
               <img src={slot.drawingDataUrl} alt={`Рисунок ${slot.index + 1}`} />
             ) : (
               <span className="slot-num">{slot.index + 1}</span>
-            )}
-            {slot.answered && (
-              <span className={`mark ${slot.correct ? 'ok' : 'bad'}`}>
-                {slot.correct ? '✓' : '×'}
-              </span>
             )}
           </button>
         ))}
       </div>
 
-      {!selected && !revealWord && (
+      {!selected && (
         <p className="hint center-hint">Выбери рисунок / лист</p>
       )}
 

@@ -3,9 +3,9 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ScorePeek } from '../components/ScorePeek'
 import { quizPlan } from '../game/reducer'
 import { beepCount, beepGo, beepReady, resumeSfx } from '../game/sfx'
-import type { NarratorEngine } from '../game/tts'
-import { wait } from '../game/tts'
-import type { Player } from '../game/types'
+import { armNarrator, wait, type NarratorEngine } from '../game/tts'
+import type { GameSettings, Player, WordCategory } from '../game/types'
+import { categoryLabel } from '../game/words'
 
 type Phase = 'preparing' | 'ready' | 'counting'
 
@@ -14,8 +14,8 @@ type Props = {
   players: Player[]
   roundLabel: string
   wordCount: number
-  drawMode: string
   speed: string
+  categories: GameSettings['categories']
   artistsDone: number
   onPrepare: (onProgress: (pct: number) => void) => Promise<NarratorEngine>
   onBegin: () => Promise<void>
@@ -25,13 +25,16 @@ type Props = {
 const SPEED_LABEL: Record<string, string> = {
   slow: 'медленно',
   normal: 'норма',
+  fast: 'быстро',
   chaos: 'хаос',
 }
 
-const ENGINE_LABEL: Record<NarratorEngine, string> = {
-  silero: 'Silero · aidar',
-  piper: 'Piper Irina (запасной)',
-  google: 'Google (запасной)',
+function categoriesBrief(categories: GameSettings['categories']): string {
+  if (categories === 'all' || !categories.length) return 'все категории'
+  if (categories.length <= 3) {
+    return categories.map((c: WordCategory) => categoryLabel(c)).join(', ')
+  }
+  return `${categories.length} категории`
 }
 
 export function ReadyScreen({
@@ -39,8 +42,8 @@ export function ReadyScreen({
   players,
   roundLabel,
   wordCount,
-  drawMode,
   speed,
+  categories,
   artistsDone,
   onPrepare,
   onBegin,
@@ -48,7 +51,6 @@ export function ReadyScreen({
 }: Props) {
   const [phase, setPhase] = useState<Phase>('preparing')
   const [progress, setProgress] = useState(0)
-  const [engine, setEngine] = useState<NarratorEngine | null>(null)
   const [count, setCount] = useState<number | null>(null)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -65,20 +67,18 @@ export function ReadyScreen({
 
     void (async () => {
       try {
-        const eng = await onPrepare((pct) => {
+        await onPrepare((pct) => {
           if (!cancelledRef.current) setProgress(pct)
         })
         if (cancelledRef.current) return
-        setEngine(eng)
         setPhase('ready')
         setProgress(100)
         await resumeSfx()
         beepReady()
       } catch {
         if (cancelledRef.current) return
-        setError('Не удалось загрузить диктора. Проверь звук и npm run tts.')
+        setError('Не удалось загрузить диктора. Проверь звук.')
         setPhase('ready')
-        setEngine('google')
       }
     })()
 
@@ -99,6 +99,8 @@ export function ReadyScreen({
     setPhase('counting')
     void (async () => {
       await resumeSfx()
+      // Жест пользователя: разблокируем Audio + speechSynthesis до countdown
+      await armNarrator()
       for (const n of [3, 2, 1]) {
         if (cancelledRef.current) return
         setCount(n)
@@ -142,32 +144,37 @@ export function ReadyScreen({
         ← К команде
       </button>
 
-      <div className="pass-phone" role="status">
-        Передай телефон → <strong>{artist.name}</strong>
+      <p className="eyebrow">{roundLabel}</p>
+
+      <div className="turn-card" role="status">
+        <p className="turn-card-label">Сейчас рисует</p>
+        <p className="turn-card-name">{artist.name}</p>
       </div>
 
-      <p className="eyebrow">{roundLabel}</p>
-      <h2>
-        Художник:
-        <span className="accent"> {artist.name}</span>
-      </h2>
       <p className="lede">
-        {wordCount} слов · {drawMode === 'paper' ? 'листы' : 'экран'} ·{' '}
-        {SPEED_LABEL[speed] || speed}. Текст не показывается — только звук.
+        {wordCount} слов · {SPEED_LABEL[speed] || speed} ·{' '}
+        {categoriesBrief(categories)}
       </p>
 
-      <ul className="artist-queue">
-        {order.map((p) => (
-          <li
-            key={p.id}
-            className={
-              p.current ? 'current' : p.done ? 'done' : undefined
-            }
-          >
-            {p.done ? '✓' : p.current ? '→' : '·'} {p.name}
-          </li>
-        ))}
-      </ul>
+      <div className="turn-queue">
+        <h3>Очередь художников</h3>
+        <ol className="artist-queue">
+          {order.map((p, i) => (
+            <li
+              key={p.id}
+              className={
+                p.current ? 'current' : p.done ? 'done' : 'waiting'
+              }
+            >
+              <span className="aq-index">{i + 1}</span>
+              <span className="aq-name">{p.name}</span>
+              <span className="aq-badge">
+                {p.done ? 'уже был' : p.current ? 'сейчас' : 'дальше'}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
 
       {artistsDone > 0 && <ScorePeek players={players} compact />}
 
@@ -186,18 +193,6 @@ export function ReadyScreen({
             <span style={{ width: `${Math.max(progress, 5)}%` }} />
           </div>
         </div>
-      )}
-
-      {phase === 'ready' && engine && (
-        <p className="hint">
-          Диктор готов: <strong>{ENGINE_LABEL[engine]}</strong>
-          {engine !== 'silero' && (
-            <>
-              {' '}
-              — для чёткого русского запусти <code>npm run tts</code>
-            </>
-          )}
-        </p>
       )}
 
       {error && <p className="hint">{error}</p>}

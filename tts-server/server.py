@@ -1,6 +1,6 @@
 """
 Локальный живой диктор: Silero TTS v5 (open-source, лучший для русского).
-GET /tts?q=слово&voice=aidar → audio/wav
+GET /tts?q=слово&voice=eugene → audio/wav
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ import numpy as np
 import torch
 
 from stress import mark_stress
-from shape import SHAPES, shape_word
 
 PORT = int(os.environ.get("TTS_PORT", "9899"))
 SAMPLE_RATE = int(os.environ.get("TTS_SR", "48000"))
-DEFAULT_VOICE = os.environ.get("TTS_VOICE", "aidar")
+# eugene — мужской, на коротких словах яснее aidar (б/г и долгие гласные)
+DEFAULT_VOICE = os.environ.get("TTS_VOICE", "eugene")
 VOICES = ("aidar", "baya", "kseniya", "xenia", "eugene")
 
 MODEL_URL = "https://models.silero.ai/models/tts/ru/v5_ru.pt"
@@ -180,20 +180,15 @@ def _reset_model_state() -> None:
 
 
 def synthesize(text: str, voice: str) -> bytes:
+    """Чистый Silero + ручные ударения. Скорость режима меняет только паузу на клиенте."""
     speaker = voice if voice in VOICES else DEFAULT_VOICE
-    clean = " ".join(text.split()).lower()
-    shaped = clean in SHAPES
-    if shaped:
-        phrase, manual = SHAPES[clean], True
-    else:
-        phrase, manual = speakable(clean)
+    phrase, manual = speakable(text)
     with _synth_lock:
         with torch.inference_mode():
             audio = model.apply_tts(
                 text=phrase,
                 speaker=speaker,
                 sample_rate=SAMPLE_RATE,
-                # Своё «+» не отдаём автоударению — оно переставляет удар и смазывает согласные.
                 put_accent=not manual,
                 put_yo=True,
             )
@@ -201,23 +196,6 @@ def synthesize(text: str, voice: str) -> bytes:
             arr = np.array(audio.detach().cpu().numpy(), dtype=np.float32, copy=True)
         else:
             arr = np.array(audio, dtype=np.float32, copy=True)
-        if shaped:
-            shaped_arr = shape_word(clean, arr, SAMPLE_RATE)
-            # Если «а» в «гриба» не отделилась, не говорим «гриба» — оставляем обычное «гриб».
-            if clean == "гриб" and shaped_arr is arr:
-                audio = model.apply_tts(
-                    text="гр+иб.",
-                    speaker=speaker,
-                    sample_rate=SAMPLE_RATE,
-                    put_accent=False,
-                    put_yo=True,
-                )
-                if hasattr(audio, "detach"):
-                    arr = np.array(audio.detach().cpu().numpy(), dtype=np.float32, copy=True)
-                else:
-                    arr = np.array(audio, dtype=np.float32, copy=True)
-            else:
-                arr = shaped_arr
         _reset_model_state()
     return float_to_wav(arr, SAMPLE_RATE)
 

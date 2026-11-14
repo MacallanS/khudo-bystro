@@ -1,5 +1,12 @@
 import { MAX_PLAYERS } from '../game/reducer'
-import type { DrawMode, GameSettings, Speed, WordCount } from '../game/types'
+import type {
+  DrawMode,
+  GameSettings,
+  Speed,
+  WordCategory,
+  WordCount,
+} from '../game/types'
+import { categoryLabel, listCategories } from '../game/words'
 
 type Props = {
   names: string[]
@@ -9,6 +16,13 @@ type Props = {
   onStart: () => void
   onBack: () => void
 }
+
+const SPEED_OPTIONS: [Speed, string][] = [
+  ['slow', 'Медленно'],
+  ['normal', 'Норма'],
+  ['fast', 'Быстро'],
+  ['chaos', 'Хаос'],
+]
 
 export function LobbyScreen({
   names,
@@ -31,6 +45,21 @@ export function LobbyScreen({
   const removePlayer = (i: number) => {
     if (names.length <= 2) return
     onNames(names.filter((_, idx) => idx !== i))
+  }
+
+  const selectedCats: WordCategory[] =
+    settings.categories === 'all' ? [] : settings.categories
+  const allSelected = settings.categories === 'all'
+
+  const toggleCategory = (cat: WordCategory) => {
+    if (allSelected) {
+      onSettings({ categories: [cat] })
+      return
+    }
+    const next = selectedCats.includes(cat)
+      ? selectedCats.filter((c) => c !== cat)
+      : [...selectedCats, cat]
+    onSettings({ categories: next.length ? next : 'all' })
   }
 
   const ready =
@@ -81,7 +110,7 @@ export function LobbyScreen({
 
       <div className="card-block">
         <h3>Режим рисования</h3>
-        <div className="seg">
+        <div className="seg seg-2">
           {([
             ['phone', 'На телефоне'],
             ['paper', 'На листах'],
@@ -99,9 +128,35 @@ export function LobbyScreen({
       </div>
 
       <div className="card-block">
+        <h3>Категории</h3>
+        <div className="cat-chips">
+          <button
+            type="button"
+            className={allSelected ? 'chip on' : 'chip'}
+            onClick={() => onSettings({ categories: 'all' })}
+          >
+            Все
+          </button>
+          {listCategories().map((cat) => {
+            const on = !allSelected && selectedCats.includes(cat)
+            return (
+              <button
+                key={cat}
+                type="button"
+                className={on ? 'chip on' : 'chip'}
+                onClick={() => toggleCategory(cat)}
+              >
+                {categoryLabel(cat)}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="card-block">
         <h3>Слов за раунд</h3>
-        <div className="seg">
-          {([10, 15, 25] as WordCount[]).map((n) => (
+        <div className="seg seg-4">
+          {([10, 15, 25, 40] as WordCount[]).map((n) => (
             <button
               key={n}
               type="button"
@@ -116,12 +171,8 @@ export function LobbyScreen({
 
       <div className="card-block">
         <h3>Скорость диктанта</h3>
-        <div className="seg">
-          {([
-            ['slow', 'Медленно'],
-            ['normal', 'Норма'],
-            ['chaos', 'Хаос'],
-          ] as [Speed, string][]).map(([value, label]) => (
+        <div className="seg seg-4">
+          {SPEED_OPTIONS.map(([value, label]) => (
             <button
               key={value}
               type="button"
@@ -132,6 +183,9 @@ export function LobbyScreen({
             </button>
           ))}
         </div>
+        {settings.speed === 'chaos' && (
+          <p className="seg-hint">Пауза каждый раз разная, от 1 с</p>
+        )}
       </div>
 
       <button

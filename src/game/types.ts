@@ -1,6 +1,23 @@
 export type DrawMode = 'paper' | 'phone'
-export type Speed = 'slow' | 'normal' | 'chaos'
-export type WordCount = 10 | 15 | 25
+export type Speed = 'slow' | 'normal' | 'fast' | 'chaos'
+export type WordCount = 10 | 15 | 25 | 40
+export type WordCategory =
+  | 'animals'
+  | 'food'
+  | 'home'
+  | 'transport'
+  | 'nature'
+  | 'school'
+  | 'tech'
+  | 'sport'
+  | 'clothes'
+  | 'jobs'
+  | 'body'
+  | 'tools'
+  | 'fantasy'
+  | 'party'
+  | 'kitchen'
+  | 'city'
 export type Phase =
   | 'home'
   | 'rules'
@@ -30,6 +47,7 @@ export interface GameSettings {
   drawMode: DrawMode
   speed: Speed
   wordCount: WordCount
+  categories: 'all' | WordCategory[]
 }
 
 export interface GameState {

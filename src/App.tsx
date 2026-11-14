@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { InstallBanner } from './components/InstallBanner'
+import { PullToRefresh } from './components/PullToRefresh'
 import { UpdateBanner } from './components/UpdateBanner'
 import {
   askersFor,
@@ -85,16 +86,27 @@ export default function App() {
   const prepareRound = useCallback(
     async (onProgress: (pct: number) => void): Promise<NarratorEngine> => {
       const used = state.slots.map((s) => s.word)
-      const words = pickWords(state.settings.wordCount, used)
+      const words = pickWords(state.settings.wordCount, {
+        exclude: used,
+        categories: state.settings.categories,
+      })
       pendingWordsRef.current = words
       const engine = await prepareNarrator(onProgress)
-      await prefetchWords([
-        ...ruCardinalsUpTo(Math.min(words.length, 6)),
-        ...words.slice(0, 6),
-      ])
+      // Prefetch только для Silero/Piper; native не нужен. Не блокируем ready на весь раунд.
+      if (engine === 'silero' || engine === 'piper') {
+        const head = [
+          ...ruCardinalsUpTo(Math.min(8, words.length)),
+          ...words.slice(0, 8),
+        ]
+        await prefetchWords(head)
+        void prefetchWords([
+          ...ruCardinalsUpTo(words.length).slice(8),
+          ...words.slice(8),
+        ])
+      }
       return engine
     },
-    [state.slots, state.settings.wordCount],
+    [state.slots, state.settings.wordCount, state.settings.categories],
   )
 
   const beginRound = useCallback(async () => {
@@ -102,11 +114,14 @@ export default function App() {
     const words = pendingWordsRef.current
     if (!words.length) {
       const used = state.slots.map((s) => s.word)
-      pendingWordsRef.current = pickWords(state.settings.wordCount, used)
+      pendingWordsRef.current = pickWords(state.settings.wordCount, {
+        exclude: used,
+        categories: state.settings.categories,
+      })
     }
     await requestWakeLock()
     dispatch({ type: 'BEGIN_ROUND', words: pendingWordsRef.current })
-  }, [state.slots, state.settings.wordCount])
+  }, [state.slots, state.settings.wordCount, state.settings.categories])
 
   const partyFinished =
     state.phase === 'finished' ||
@@ -125,6 +140,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <PullToRefresh />
       <UpdateBanner />
       <InstallBanner />
 
@@ -173,8 +189,8 @@ export default function App() {
           players={state.players}
           roundLabel={`Раунд ${state.artistsDone + 1} из ${state.players.length}`}
           wordCount={state.settings.wordCount}
-          drawMode={state.settings.drawMode}
           speed={state.settings.speed}
+          categories={state.settings.categories}
           artistsDone={state.artistsDone}
           onPrepare={prepareRound}
           onBegin={beginRound}
@@ -212,10 +228,8 @@ export default function App() {
           quizAsksDone={state.quizAsksDone}
           quizAskTarget={state.quizAskTarget || quiz.target}
           selectedSlotIndex={state.selectedSlotIndex}
-          revealWord={state.revealWord}
           onSelect={(index) => dispatch({ type: 'SELECT_SLOT', index })}
           onAnswer={(correct) => dispatch({ type: 'ANSWER', correct })}
-          onClearReveal={() => dispatch({ type: 'CLEAR_REVEAL' })}
           onLeave={() => dispatch({ type: 'GO_LOBBY' })}
         />
       )}

@@ -7,20 +7,30 @@ import type { Speed } from './types'
 export const GAP_MS: Record<Speed, number> = {
   slow: 3200,
   normal: 2000,
-  chaos: 1100,
+  fast: 1200,
+  chaos: 1400, // ориентир для UI; в раунде берётся randomGap()
 }
 
-/** Не ускоряем речь — хаос только через короткий GAP_MS */
+/** Случайная пауза в «Хаосе»: от 1 с до ~1,8 с */
+export function randomGap(): number {
+  const min = 1000
+  const max = 1800
+  return min + Math.floor(Math.random() * (max - min + 1))
+}
+
+/** Речь всегда одна и та же — скорость режима только через GAP */
 const PLAYBACK_RATE: Record<Speed, number> = {
-  slow: 0.95,
+  slow: 1.0,
   normal: 1.0,
+  fast: 1.0,
   chaos: 1.0,
 }
 
 const PIPER_VOICE = 'ru_RU-irina-medium' as const
 const SILERO_PROBE_MS = 900
+const PIPER_READY_MS = 45_000
 
-export type NarratorEngine = 'silero' | 'piper' | 'google'
+export type NarratorEngine = 'silero' | 'piper' | 'google' | 'native'
 export type NarratorStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 let currentAudio: HTMLAudioElement | null = null
@@ -32,7 +42,8 @@ let piperProgress = 0
 let activeEngine: NarratorEngine | null = null
 let narratorStatus: NarratorStatus = 'idle'
 let preparePromise: Promise<NarratorEngine> | null = null
-let synthChain: Promise<unknown> = Promise.resolve()
+let speakChain: Promise<unknown> = Promise.resolve()
+let prefetchChain: Promise<unknown> = Promise.resolve()
 const cache = new Map<string, string>()
 const inflight = new Map<string, Promise<string>>()
 
@@ -49,10 +60,29 @@ function cancelSystemVoice(): void {
   window.speechSynthesis.cancel()
 }
 
-/** Один синтез за раз — prefetch не обгоняет и не смешивается с текущим словом. */
-function enqueueSynth<T>(task: () => Promise<T>): Promise<T> {
-  const run = synthChain.then(task, task)
-  synthChain = run.then(
+/** Озвучка не ждёт prefetch — номер «один» не стоит в хвосте прогрева. */
+function enqueueSpeak<T>(task: () => Promise<T>): Promise<T> {
+  const run = speakChain.then(task, task)
+  speakChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+/** Prefetch только когда speak-очередь свободна. */
+function enqueuePrefetch<T>(task: () => Promise<T>): Promise<T> {
+  const run = prefetchChain.then(
+    async () => {
+      await speakChain
+      return task()
+    },
+    async () => {
+      await speakChain
+      return task()
+    },
+  )
+  prefetchChain = run.then(
     () => undefined,
     () => undefined,
   )
@@ -94,14 +124,7 @@ function stopCurrent(): void {
 }
 
 function localTtsUrl(word: string): string {
-  return `/api/tts?q=${encodeURIComponent(word)}&voice=aidar&v=3`
-}
-
-function googleTtsUrl(word: string): string {
-  return (
-    `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=ru` +
-    `&q=${encodeURIComponent(word)}`
-  )
+  return `/api/tts?q=${encodeURIComponent(word)}&voice=eugene&v=6`
 }
 
 async function fetchToObjectUrl(
@@ -191,27 +214,29 @@ async function resolveWithEngine(
     return src
   }
 
-  // google — только как выбранный activeEngine, не mid-word mix
+  // google через локальный proxy (dev); иначе URL часто 403 в Audio
   try {
     const { src } = await fetchToObjectUrl(localTtsUrl(word))
     cache.set(key, src)
     trimCache()
     return src
   } catch {
-    const url = googleTtsUrl(word)
-    cache.set(key, url)
-    return url
+    throw new Error('google tts unavailable')
   }
 }
 
-async function resolveAudioSrc(word: string): Promise<string> {
+async function resolveAudioSrc(
+  word: string,
+  priority: 'speak' | 'prefetch' = 'speak',
+): Promise<string> {
   const normalized = normalizeRuWord(word) || word.trim().toLowerCase()
   const hit = cache.get(normalized)
   if (hit) return hit
   const pending = inflight.get(normalized)
   if (pending) return pending
 
-  const job = enqueueSynth(() => synthesizeQueued(normalized))
+  const enqueue = priority === 'speak' ? enqueueSpeak : enqueuePrefetch
+  const job = enqueue(() => synthesizeQueued(normalized))
   inflight.set(normalized, job)
   try {
     return await job
@@ -220,34 +245,50 @@ async function resolveAudioSrc(word: string): Promise<string> {
   }
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer = 0
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error('timeout')), ms)
+      }),
+    ])
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
+
 async function synthesizeQueued(normalized: string): Promise<string> {
   const cached = cache.get(normalized)
   if (cached) return cached
-  const engine = activeEngine ?? 'piper'
+  const engine = activeEngine ?? 'native'
+  if (engine === 'native') {
+    throw new Error('native has no audio src')
+  }
   try {
     return await resolveWithEngine(normalized, engine)
   } catch {
-    // выбранный движок упал — один раз переключаемся явно
     if (engine === 'silero') {
       try {
-        await ensurePiper()
+        await withTimeout(ensurePiper(), PIPER_READY_MS)
         activeEngine = 'piper'
         return await resolveWithEngine(normalized, 'piper')
       } catch {
-        activeEngine = 'google'
-        return resolveWithEngine(normalized, 'google')
+        activeEngine = 'native'
+        throw new Error('tts failed')
       }
     }
-    if (engine === 'piper') {
-      activeEngine = 'google'
-      return resolveWithEngine(normalized, 'google')
+    if (engine === 'piper' || engine === 'google') {
+      activeEngine = 'native'
+      throw new Error('tts failed')
     }
     throw new Error('tts failed')
   }
 }
 
 function trimCache(): void {
-  if (cache.size <= 120) return
+  if (cache.size <= 200) return
   const first = cache.keys().next().value
   if (!first) return
   const old = cache.get(first)
@@ -368,13 +409,33 @@ async function silentUnlock(): Promise<void> {
   }
 }
 
+/** Разблокировка Audio / speechSynthesis по жесту пользователя (клик «Начать»). */
+export async function armNarrator(): Promise<void> {
+  if (typeof window === 'undefined') return
+  await silentUnlock()
+  unlocked = true
+  try {
+    if (!window.speechSynthesis) return
+    window.speechSynthesis.cancel()
+    const utter = new SpeechSynthesisUtterance(' ')
+    utter.volume = 0
+    utter.rate = 2
+    utter.lang = 'ru-RU'
+    window.speechSynthesis.speak(utter)
+    window.speechSynthesis.cancel()
+  } catch {
+    // ignore
+  }
+}
+
 /**
- * Прогрев без слышимой речи. Silero first — Piper не качаем, если Silero жив.
+ * Прогрев без слышимой речи.
+ * Silero (локальный /api/tts) → Piper (браузер) → native (speechSynthesis).
  */
 export async function prepareNarrator(
   onProgress?: (pct: number) => void,
 ): Promise<NarratorEngine> {
-  if (typeof window === 'undefined') return 'google'
+  if (typeof window === 'undefined') return 'native'
   if (activeEngine && narratorStatus === 'ready') {
     onProgress?.(100)
     return activeEngine
@@ -397,19 +458,19 @@ export async function prepareNarrator(
 
     onProgress?.(15)
     try {
-      await ensurePiper(onProgress)
-      // silent cache probe
-      const src = await synthesizePiper('кот')
+      await withTimeout(ensurePiper(onProgress), PIPER_READY_MS)
+      const src = await withTimeout(synthesizePiper('кот'), 12_000)
       cache.set('кот', src)
       activeEngine = 'piper'
       narratorStatus = 'ready'
       onProgress?.(100)
       return 'piper'
     } catch {
-      activeEngine = 'google'
+      // Google Translate TTS с github.io почти всегда 403 — системный RU-голос надёжнее
+      activeEngine = 'native'
       narratorStatus = 'ready'
       onProgress?.(100)
-      return 'google'
+      return 'native'
     }
   })()
 
@@ -445,12 +506,16 @@ export async function speakWord(
   try {
     if (!activeEngine) await prepareNarrator()
     if (isStale(gen, opts)) return
-    const src = await resolveAudioSrc(text)
+
+    if (activeEngine === 'native') {
+      await speakNative(text, speed, gen)
+      return
+    }
+
+    const src = await resolveAudioSrc(text, 'speak')
     if (isStale(gen, opts)) return
     await playSrc(src, speed, gen)
   } catch {
-    // Системный голос только если аудиодвижки ничего не отдали
-    // и этот вызов всё ещё актуален — иначе он звучит вторым диктором.
     if (isStale(gen, opts)) return
     try {
       await speakNative(text, speed, gen)
@@ -462,9 +527,10 @@ export async function speakWord(
 
 export async function prefetchWords(words: string[]): Promise<void> {
   if (!unlocked && !activeEngine) return
+  if (activeEngine === 'native') return
   for (const w of words) {
     try {
-      await resolveAudioSrc(w)
+      await resolveAudioSrc(w, 'prefetch')
     } catch {
       break
     }

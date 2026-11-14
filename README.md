@@ -27,7 +27,7 @@ npm run dev
 
 | Движок | Качество RU | Где крутится |
 |--------|-------------|--------------|
-| **Silero v5** (`aidar`/`xenia`/…) | лучший баланс ясность+живость на CPU | `npm run tts` |
+| **Silero v5** (`eugene`, запасные `aidar`/`xenia`) | ясный мужской RU на CPU + правки ударений | `npm run tts` |
 | **Piper** `ru_RU-irina-medium` | самый живой из Piper RU | браузер WASM |
 | Fish / XTTS / Qwen3-TTS / Chatterbox | ещё «сценичнее», но GPU и тяжело | не для PWA за столом |
 

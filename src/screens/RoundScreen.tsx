@@ -6,11 +6,16 @@ import {
   GAP_MS,
   pauseSpeaking,
   prefetchWords,
+  randomGap,
   resumeSpeaking,
   speakWord,
   stopSpeaking,
+  wait,
   waitInterruptible,
 } from '../game/tts'
+
+/** Пауза между номером и словом — всегда одна, не зависит от скорости */
+const NUMBER_WORD_GAP_MS = 280
 import type { DrawMode, Slot, Speed } from '../game/types'
 
 type Props = {
@@ -38,6 +43,7 @@ export function RoundScreen({
 }: Props) {
   const [status, setStatus] = useState<'speak' | 'gap'>('speak')
   const [gapLeft, setGapLeft] = useState(0)
+  const [gapBudget, setGapBudget] = useState(GAP_MS[speed])
   const [ttsError, setTtsError] = useState(false)
   const [paused, setPaused] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
@@ -91,6 +97,8 @@ export function RoundScreen({
       try {
         await speakWord(ruCardinal(index + 1), speed, { isCancelled: done })
         if (done()) return
+        await wait(NUMBER_WORD_GAP_MS)
+        if (done()) return
         await speakWord(slot.word, speed, { isCancelled: done })
       } catch {
         if (!done()) setTtsError(true)
@@ -107,7 +115,8 @@ export function RoundScreen({
       if (done()) return
 
       setStatus('gap')
-      const budget = GAP_MS[speed]
+      const budget = speed === 'chaos' ? randomGap() : GAP_MS[speed]
+      setGapBudget(budget)
       setGapLeft(budget)
 
       const result = await waitInterruptible(budget, {
@@ -151,7 +160,7 @@ export function RoundScreen({
     onBack()
   }
 
-  const gapPct = Math.max(0, Math.min(100, (gapLeft / GAP_MS[speed]) * 100))
+  const gapPct = Math.max(0, Math.min(100, (gapLeft / Math.max(gapBudget, 1)) * 100))
   const listening = status === 'speak' && !paused
   const label = paused
     ? 'На паузе'
@@ -193,7 +202,7 @@ export function RoundScreen({
       >
         {ttsError && (
           <p className="hint stage-hint">
-            Голос не ответил — проверь звук / <code>npm run tts</code>
+            Голос не ответил — проверь звук
           </p>
         )}
         <p className="word-label">{label}</p>

@@ -1,47 +1,126 @@
-const WORDS = [
-  'кот', 'собака', 'рыба', 'птица', 'мышь', 'лошадь', 'корова', 'свинья', 'утка', 'гусь',
-  'слон', 'жираф', 'лев', 'тигр', 'медведь', 'лиса', 'волк', 'заяц', 'ёж', 'белка',
-  'пингвин', 'кит', 'дельфин', 'акула', 'краб', 'осьминог', 'бабочка', 'пчела', 'муравей', 'паук',
-  'яблоко', 'банан', 'груша', 'арбуз', 'дыня', 'вишня', 'клубника', 'апельсин', 'лимон', 'виноград',
-  'хлеб', 'сыр', 'торт', 'пицца', 'суп', 'каша', 'яйцо', 'молоко', 'мороженое', 'конфета',
-  'кофе', 'чай', 'сок', 'торт', 'бутерброд', 'печенье', 'шоколад', 'попкорн', 'суши', 'лапша',
-  'дом', 'дверь', 'окно', 'крыша', 'лестница', 'диван', 'стул', 'стол', 'кровать', 'шкаф',
-  'лампа', 'зеркало', 'ковёр', 'подушка', 'одеяло', 'часы', 'ключ', 'замок', 'полка', 'ваза',
-  'машина', 'автобус', 'поезд', 'самолёт', 'корабль', 'велосипед', 'мотоцикл', 'трамвай', 'ракета', 'вертолёт',
-  'лодка', 'такси', 'грузовик', 'самокат', 'лыжи', 'коньки', 'санки', 'катер', 'подлодка', 'метро',
-  'солнце', 'луна', 'звезда', 'облако', 'дождь', 'снег', 'гроза', 'радуга', 'ветер', 'гора',
-  'река', 'море', 'озеро', 'лес', 'дерево', 'цветок', 'трава', 'камень', 'остров', 'вулкан',
-  'книга', 'ручка', 'карандаш', 'тетрадь', 'школа', 'доска', 'рюкзак', 'линейка', 'ластик', 'глобус',
-  'телефон', 'компьютер', 'камера', 'телевизор', 'наушники', 'пульт', 'розетка', 'батарейка', 'робот', 'дрон',
-  'мяч', 'мячик', 'ракетка', 'шахматы', 'кубик', 'пазл', 'барабан', 'гитара', 'скрипка', 'пианино',
-  'шляпа', 'шапка', 'куртка', 'платье', 'рубашка', 'штаны', 'юбка', 'ботинок', 'кроссовок', 'носок',
-  'очки', 'зонт', 'сумка', 'рюкзак', 'ремень', 'галстук', 'шарф', 'перчатка', 'кольцо', 'часы',
-  'врач', 'повар', 'учитель', 'пожарный', 'полицейский', 'пилот', 'водитель', 'строитель', 'художник', 'музыкант',
-  'зуб', 'глаз', 'нос', 'ухо', 'рука', 'нога', 'сердце', 'палец', 'волос', 'улыбка',
-  'зонт', 'ведро', 'лопата', 'молоток', 'отвёртка', 'пила', 'гвоздь', 'верёвка', 'фонарик', 'свеча',
-  'замок', 'корона', 'меч', 'щит', 'дракон', 'призрак', 'скелет', 'ведьма', 'волшебник', 'пират',
-  'карта', 'компас', 'сундук', 'монета', 'подарок', 'ёлка', 'снежинка', 'маска', 'фейерверк', 'шарик',
-  'чайник', 'сковорода', 'кастрюля', 'тарелка', 'ложка', 'вилка', 'нож', 'чашка', 'стакан', 'бутылка',
-  'утюг', 'пылесос', 'стиралка', 'холодильник', 'микроволновка', 'фен', 'расчёска', 'зубная щётка', 'мыло', 'полотенце',
-  'парк', 'мост', 'башня', 'забор', 'скамейка', 'фонтан', 'палатка', 'костёр', 'рюкзак', 'компас',
-  'свисток', 'флажок', 'медаль', 'кубок', 'старт', 'финиш', 'ворота', 'сетка', 'скакалка',
-  'кактус', 'пальма', 'гриб', 'жёлудь', 'лист', 'ветка', 'гнездо', 'улитка', 'лягушка', 'черепаха',
+import { WORD_BANK, type WordEntry } from './wordBank'
+import type { WordCategory } from './types'
+
+export type { WordEntry }
+
+export const WORD_CATEGORIES: WordCategory[] = [
+  'animals',
+  'food',
+  'home',
+  'transport',
+  'nature',
+  'school',
+  'tech',
+  'sport',
+  'clothes',
+  'jobs',
+  'body',
+  'tools',
+  'fantasy',
+  'party',
+  'kitchen',
+  'city',
 ]
 
-const CLEAN = [...new Set(WORDS.map((w) => w.trim().toLowerCase()).filter(Boolean))]
+const CATEGORY_LABELS: Record<WordCategory, string> = {
+  animals: 'животные',
+  food: 'еда',
+  home: 'дом',
+  transport: 'транспорт',
+  nature: 'природа',
+  school: 'школа',
+  tech: 'техника',
+  sport: 'спорт',
+  clothes: 'одежда',
+  jobs: 'профессии',
+  body: 'тело',
+  tools: 'инструменты',
+  fantasy: 'фэнтези',
+  party: 'праздник',
+  kitchen: 'кухня',
+  city: 'город',
+}
 
-export function pickWords(count: number, exclude: string[] = []): string[] {
-  const banned = new Set(exclude)
-  const pool = CLEAN.filter((w) => !banned.has(w))
-  const source = pool.length >= count ? pool : CLEAN
-  const copy = [...source]
+export type PickWordsOpts = {
+  exclude?: string[]
+  categories?: 'all' | WordCategory[]
+}
+
+export function listCategories(): WordCategory[] {
+  return [...WORD_CATEGORIES]
+}
+
+export function categoryLabel(c: WordCategory): string {
+  return CATEGORY_LABELS[c]
+}
+
+export function wordBankSize(): number {
+  return WORD_BANK.length
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const copy = [...arr]
   for (let i = copy.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
     ;[copy[i], copy[j]] = [copy[j], copy[i]]
   }
-  return copy.slice(0, count)
+  return copy
 }
 
-export function wordBankSize(): number {
-  return CLEAN.length
+function matchCategories(
+  entry: WordEntry,
+  categories: 'all' | WordCategory[],
+): boolean {
+  if (categories === 'all' || !categories.length) return true
+  return categories.includes(entry.c)
+}
+
+function takeFrom(
+  pool: WordEntry[],
+  need: number,
+  banned: Set<string>,
+  picked: string[],
+): void {
+  for (const e of shuffle(pool)) {
+    if (picked.length >= need) return
+    if (banned.has(e.w) || picked.includes(e.w)) continue
+    picked.push(e.w)
+  }
+}
+
+/** Берёт простые слова; если в категориях мало — добирает из всего банка. */
+export function pickWords(
+  count: number,
+  excludeOrOpts: string[] | PickWordsOpts = [],
+  maybeOpts?: PickWordsOpts,
+): string[] {
+  const opts: PickWordsOpts = Array.isArray(excludeOrOpts)
+    ? { ...(maybeOpts ?? {}), exclude: excludeOrOpts }
+    : excludeOrOpts
+
+  const banned = new Set(
+    (opts.exclude ?? []).map((w) => w.trim().toLowerCase()).filter(Boolean),
+  )
+  const categories =
+    !opts.categories ||
+    opts.categories === 'all' ||
+    (Array.isArray(opts.categories) && opts.categories.length === 0)
+      ? 'all'
+      : opts.categories
+
+  const available = WORD_BANK.filter((e) => !banned.has(e.w))
+  const picked: string[] = []
+
+  const primary = available.filter((e) => matchCategories(e, categories))
+  takeFrom(primary, count, banned, picked)
+
+  if (picked.length < count) {
+    takeFrom(available, count, banned, picked)
+  }
+
+  if (picked.length < count) {
+    takeFrom(WORD_BANK, count, banned, picked)
+  }
+
+  return picked.slice(0, count)
 }

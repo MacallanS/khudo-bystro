@@ -1,15 +1,11 @@
-import { useEffect, useState } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
 const CHECK_MS = 60_000
 
+/** Silent PWA auto-update: no banner, activate + reload when a new SW is ready. */
 export function UpdateBanner() {
-  const [dismissed, setDismissed] = useState(false)
-
-  const {
-    needRefresh: [needRefresh, setNeedRefresh],
-    updateServiceWorker,
-  } = useRegisterSW({
+  useRegisterSW({
+    immediate: true,
     onRegisteredSW(_swUrl, registration) {
       if (!registration) return
 
@@ -26,37 +22,5 @@ export function UpdateBanner() {
     },
   })
 
-  useEffect(() => {
-    if (needRefresh) setDismissed(false)
-  }, [needRefresh])
-
-  if (!needRefresh || dismissed) return null
-
-  return (
-    <div className="install-banner">
-      <div>
-        <strong>Доступна новая версия</strong>
-        <p>Обнови, чтобы получить свежие правила и фиксы. Игра перезагрузится.</p>
-      </div>
-      <div className="install-actions">
-        <button
-          type="button"
-          className="btn small"
-          onClick={() => void updateServiceWorker(true)}
-        >
-          Обновить
-        </button>
-        <button
-          type="button"
-          className="btn ghost small"
-          onClick={() => {
-            setDismissed(true)
-            setNeedRefresh(false)
-          }}
-        >
-          Позже
-        </button>
-      </div>
-    </div>
-  )
+  return null
 }
