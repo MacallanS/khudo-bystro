@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ScorePeek } from '../components/ScorePeek'
 import type { DrawMode, Player, Slot } from '../game/types'
@@ -41,15 +41,6 @@ export function QuizScreen({
     Math.floor(quizAsksDone / Math.max(askerCount, 1)) + 1,
   )
   const [confirmLeave, setConfirmLeave] = useState(false)
-  const [passFlash, setPassFlash] = useState(true)
-  const prevAsker = useRef(asker.id)
-
-  useEffect(() => {
-    if (prevAsker.current !== asker.id) {
-      prevAsker.current = asker.id
-      setPassFlash(true)
-    }
-  }, [asker.id])
 
   return (
     <section className="screen quiz">
@@ -60,19 +51,6 @@ export function QuizScreen({
       >
         ← Выйти
       </button>
-
-      {passFlash && (
-        <div className="pass-phone" role="status">
-          Телефон → спросивающий <strong>{asker.name}</strong>
-          <button
-            type="button"
-            className="btn ghost small"
-            onClick={() => setPassFlash(false)}
-          >
-            Ок
-          </button>
-        </div>
-      )}
 
       <p className="eyebrow">
         Викторина · круг {currentRound}/{quizRounds} · осталось {asksLeft}
@@ -100,10 +78,7 @@ export function QuizScreen({
               .filter(Boolean)
               .join(' ')}
             disabled={slot.answered}
-            onClick={() => {
-              setPassFlash(false)
-              onSelect(slot.index)
-            }}
+            onClick={() => onSelect(slot.index)}
           >
             {slot.answered ? (
               <>
