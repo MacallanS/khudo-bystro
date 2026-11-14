@@ -190,7 +190,7 @@ async function fetchWithTimeout(
   url: string,
   ms: number,
   engineHint?: string,
-): Promise<{ src: string; engine: string }> {
+): Promise<{ src: string; engine: string; data: ArrayBuffer }> {
   const ctrl = new AbortController()
   const timer = window.setTimeout(() => ctrl.abort(), ms)
   try {
