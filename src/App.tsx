@@ -11,7 +11,7 @@ import {
   quizPlan,
   sanitizeParty,
 } from './game/reducer'
-import { ruCardinalsUpTo } from './game/ruNumbers'
+import { dictationPrefetchOrder } from './game/ruNumbers'
 import { pickWords } from './game/words'
 import {
   prepareNarrator,
@@ -36,14 +36,23 @@ import { RulesScreen } from './screens/RulesScreen'
 import { ScoreScreen } from './screens/ScoreScreen'
 import type { GameState } from './game/types'
 
+function loadInitialState(): GameState {
+  const raw = loadParty()
+  if (raw && canResumeParty(raw)) return sanitizeParty(raw)
+  return createInitialState()
+}
+
 export default function App() {
-  const [state, dispatch] = useReducer(gameReducer, undefined, createInitialState)
+  // После reload / PWA-обновления сразу в партию, не на пустую главную
+  const [state, dispatch] = useReducer(gameReducer, undefined, loadInitialState)
   const [resumeCandidate, setResumeCandidate] = useState<GameState | null>(() => {
     const raw = loadParty()
     if (!raw || !canResumeParty(raw)) return null
     return sanitizeParty(raw)
   })
   const pendingWordsRef = useRef<string[]>([])
+  const stateRef = useRef(state)
+  stateRef.current = state
 
   useEffect(() => {
     warmUpVoices()
@@ -55,6 +64,21 @@ export default function App() {
     saveParty(state)
     if (canResumeParty(state)) setResumeCandidate(sanitizeParty(state))
   }, [state])
+
+  // Перед закрытием/reload — сразу сбросить state в storage (не ждать React effect)
+  useEffect(() => {
+    const flush = () => {
+      const s = stateRef.current
+      if (s.phase === 'home' || s.phase === 'rules') return
+      saveParty(s)
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+    }
+  }, [])
 
   const goHomeFresh = () => {
     clearParty()
@@ -91,14 +115,18 @@ export default function App() {
         categories: state.settings.categories,
       })
       pendingWordsRef.current = words
-      const engine = await prepareNarrator(onProgress)
-      // Prefetch wav заранее: на Pages Silero — готовые файлы, лучше прогреть весь раунд.
+      // Двигатель ~0–35%, затем полный прогрев раунда 35–100% — дольше старт, без дыр в диктанте.
+      const engine = await prepareNarrator((pct) =>
+        onProgress(Math.round(pct * 0.35)),
+      )
       if (engine === 'silero' || engine === 'piper') {
-        const all = [...ruCardinalsUpTo(words.length), ...words]
-        const head = all.slice(0, 12)
-        const rest = all.slice(12)
-        await prefetchWords(head)
-        void prefetchWords(rest)
+        const all = dictationPrefetchOrder(words)
+        await prefetchWords(all, (done, total) => {
+          const t = Math.max(1, total)
+          onProgress(35 + Math.round((done / t) * 65))
+        })
+      } else {
+        onProgress(100)
       }
       return engine
     },

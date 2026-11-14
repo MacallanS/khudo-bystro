@@ -188,7 +188,11 @@ export function ReadyScreen({
 
       {phase === 'preparing' && (
         <div className="tts-load">
-          <p>Готовим диктора… {progress}%</p>
+          <p>
+            {progress < 35
+              ? `Готовим диктора… ${progress}%`
+              : `Греем слова раунда… ${progress}%`}
+          </p>
           <div className="draw-bar">
             <span style={{ width: `${Math.max(progress, 5)}%` }} />
           </div>

@@ -3,6 +3,7 @@ import { CanvasDraw } from '../components/CanvasDraw'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ruCardinal } from '../game/ruNumbers'
 import {
+  ensureReady,
   GAP_MS,
   prefetchWords,
   randomGap,
@@ -13,8 +14,8 @@ import {
 } from '../game/tts'
 import type { DrawMode, Slot, Speed } from '../game/types'
 
-/** Пауза между номером и словом — всегда одна, не зависит от скорости */
-const NUMBER_WORD_GAP_MS = 280
+/** Короткая пауза между номером и словом */
+const NUMBER_WORD_GAP_MS = 120
 
 type Props = {
   slot: Slot
@@ -59,8 +60,12 @@ export function RoundScreen({
 
   useEffect(() => {
     const words = upcomingKey ? upcomingKey.split('\n') : []
-    const nums = words.map((_, i) => ruCardinal(index + 2 + i))
-    void prefetchWords([...nums, ...words])
+    // Пары: следующий номер + слово, потом ещё дальше
+    const pairs: string[] = []
+    for (let i = 0; i < words.length; i++) {
+      pairs.push(ruCardinal(index + 2 + i), words[i]!)
+    }
+    void prefetchWords(pairs)
   }, [upcomingKey, index])
 
   useEffect(() => {
@@ -107,6 +112,23 @@ export function RoundScreen({
 
         statusRef.current = 'speak'
         setStatus('speak')
+        const numberText = ruCardinal(index + 1)
+        await ensureReady([numberText, slot.word], {
+          isCancelled: speakAborted,
+        })
+        if (done()) return
+        if (speechAbortRef.current || pausedRef.current) {
+          await waitWhilePaused()
+          if (done()) return
+          continue
+        }
+        // Следующий слот греем в фоне, пока говорим текущий
+        if (upcomingWords[0]) {
+          void prefetchWords([
+            ruCardinal(index + 2),
+            upcomingWords[0],
+          ])
+        }
         const say = async (text: string) => {
           try {
             await speakWord(text, speed, { isCancelled: speakAborted })
@@ -118,7 +140,7 @@ export function RoundScreen({
           }
         }
         try {
-          await say(ruCardinal(index + 1))
+          await say(numberText)
           if (done()) return
           if (speechAbortRef.current || pausedRef.current) {
             await waitWhilePaused()

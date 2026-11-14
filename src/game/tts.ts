@@ -5,16 +5,16 @@ import type { Speed } from './types'
  * Пауза ПОСЛЕ слова, пока рисуешь.
  */
 export const GAP_MS: Record<Speed, number> = {
-  slow: 3200,
-  normal: 2000,
-  fast: 1200,
-  chaos: 1400, // ориентир для UI; в раунде берётся randomGap()
+  slow: 2800,
+  normal: 1700,
+  fast: 1000,
+  chaos: 1150, // ориентир для UI; в раунде берётся randomGap()
 }
 
-/** Случайная пауза в «Хаосе»: от 1 с до ~1,8 с */
+/** Случайная пауза в «Хаосе»: 0,8–1,5 с */
 export function randomGap(): number {
-  const min = 1000
-  const max = 1800
+  const min = 800
+  const max = 1500
   return min + Math.floor(Math.random() * (max - min + 1))
 }
 
@@ -688,14 +688,50 @@ export async function speakWord(
   }
 }
 
-export async function prefetchWords(words: string[]): Promise<void> {
+export async function prefetchWords(
+  words: string[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
   if (!unlocked && !activeEngine) return
   if (activeEngine === 'native') return
-  for (const w of words) {
+  const total = words.length
+  for (let i = 0; i < words.length; i++) {
     try {
-      await resolveAudioSrc(w, 'prefetch')
+      await resolveAudioSrc(words[i]!, 'prefetch')
     } catch {
-      break
+      // одно слово не останавливает весь прогрев
+    }
+    onProgress?.(i + 1, total)
+  }
+}
+
+/**
+ * Дождаться wav в кэше (speak-приоритет) — без тишины перед озвучкой слота.
+ * Для native сразу ok.
+ */
+export async function ensureReady(
+  texts: string[],
+  opts?: SpeakOpts,
+): Promise<void> {
+  if (typeof window === 'undefined') return
+  if (!activeEngine) {
+    try {
+      await prepareNarrator()
+    } catch {
+      return
+    }
+  }
+  if (activeEngine === 'native') return
+  const gen = speakGen
+  for (const raw of texts) {
+    if (isStale(gen, opts)) return
+    const text = normalizeRuWord(raw) || raw.trim()
+    if (!text) continue
+    if (cache.has(text)) continue
+    try {
+      await resolveAudioSrc(text, 'speak')
+    } catch {
+      // слово скажет speakWord / fallback
     }
   }
 }

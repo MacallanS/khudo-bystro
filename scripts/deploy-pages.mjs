@@ -18,6 +18,9 @@ function git(args, cwd = tmp) {
 }
 
 git(['init', '-b', 'gh-pages'])
+// Large baked TTS payload — local to this temp repo only
+git(['config', 'http.postBuffer', '524288000'])
+git(['config', 'http.version', 'HTTP/1.1'])
 git(['add', '-A'])
 git(['-c', 'user.email=pages@khudo.local', '-c', 'user.name=khudo-pages', 'commit', '-m', 'Deploy GitHub Pages build'])
 git(['remote', 'add', 'origin', 'https://github.com/MacallanS/khudo-bystro.git'])

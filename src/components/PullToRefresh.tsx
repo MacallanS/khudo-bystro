@@ -17,6 +17,8 @@ function shouldIgnoreTarget(target: EventTarget | null): boolean {
 }
 
 async function reloadApp(): Promise<void> {
+  // Дать pagehide/flush сохранить партию до перезагрузки
+  window.dispatchEvent(new Event('pagehide'))
   try {
     const regs = await navigator.serviceWorker?.getRegistrations()
     if (regs?.length) {
