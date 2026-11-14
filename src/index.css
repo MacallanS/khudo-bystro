@@ -1048,30 +1048,59 @@ h3 {
 .score-peek {
   list-style: none;
   margin: 0 0 14px;
-  padding: 10px 12px;
+  padding: 8px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: 6px;
   border-radius: 10px;
   border: 0;
   background: var(--paper);
 }
 
 .score-peek li {
-  display: flex;
-  gap: 6px;
+  display: inline-flex;
+  gap: 8px;
   align-items: baseline;
-  color: var(--muted);
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f3f0e8;
   font-size: 0.88rem;
 }
 
-.score-peek strong {
+.score-peek .sp-name {
+  color: var(--ink);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 14ch;
+}
+
+.score-peek .sp-pts {
+  flex-shrink: 0;
   color: var(--accent);
   font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-peek .sp-pts::before {
+  content: '—';
+  margin-right: 6px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.85em;
+  font-weight: 500;
 }
 
 .score-peek.compact {
-  padding: 8px 10px;
+  padding: 6px;
+}
+
+.score-peek.compact li {
+  padding: 4px 8px;
 }
 
 .rules-list {

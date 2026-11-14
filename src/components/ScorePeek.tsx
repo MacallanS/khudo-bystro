@@ -11,8 +11,10 @@ export function ScorePeek({ players, compact }: Props) {
     <ul className={`score-peek ${compact ? 'compact' : ''}`}>
       {ranked.map((p) => (
         <li key={p.id}>
-          <span>{p.name}</span>
-          <strong>{p.score}</strong>
+          <span className="sp-name">{p.name}</span>
+          <strong className="sp-pts" aria-label={`${p.score} очков`}>
+            {p.score}
+          </strong>
         </li>
       ))}
     </ul>
