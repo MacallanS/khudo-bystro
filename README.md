@@ -6,11 +6,13 @@
 
 На GitHub Pages диктор: **Piper** (в браузере) → Google. Silero доступен только локально через `npm run tts`.
 
-Деплой: ветка `gh-pages` (Actions сейчас недоступны из‑за billing на аккаунте):
+Деплой — только ветка **`gh-pages`** через локальный скрипт:
 
 ```bash
 npm run deploy:pages
 ```
+
+GitHub Actions workflow отключён (`deploy.yml.disabled`): аккаунт залочен billing’ом, job не стартует и даёт ложный Failure на каждый push. После разблокировки в GitHub → Settings → Billing можно вернуть файл в `deploy.yml` и снова включить Pages → GitHub Actions.
 
 В браузере и установленной PWA при новой версии появляется баннер «Обновить».
 
