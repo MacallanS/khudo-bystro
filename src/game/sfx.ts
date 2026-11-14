@@ -1,6 +1,9 @@
 /** Короткие звуковые индикаторы через Web Audio (без файлов). */
 
 let ctx: AudioContext | null = null
+/** Тихий loop — iOS/Android иначе suspend-ят context после первой фразы. */
+let keepAliveSource: AudioBufferSourceNode | null = null
+let keepAliveGain: GainNode | null = null
 
 /** Общий AudioContext для SFX и диктора (один resume по жесту). */
 export function getAudioContext(): AudioContext | null {
@@ -25,6 +28,52 @@ export async function resumeSfx(): Promise<void> {
     } catch {
       // ignore
     }
+  }
+}
+
+/** Держать context running на весь диктант (жест «Начать»). */
+export function holdAudioContext(): void {
+  const c = getAudioContext()
+  if (!c || keepAliveSource) return
+  try {
+    const buf = c.createBuffer(1, Math.max(1, Math.floor(c.sampleRate * 0.5)), c.sampleRate)
+    const src = c.createBufferSource()
+    const gain = c.createGain()
+    // Не 0: некоторые движки выкидывают полностью тихие ноды
+    gain.gain.value = 0.00008
+    src.buffer = buf
+    src.loop = true
+    src.connect(gain)
+    gain.connect(c.destination)
+    src.start(0)
+    keepAliveSource = src
+    keepAliveGain = gain
+  } catch {
+    // ignore
+  }
+}
+
+export function releaseAudioContextHold(): void {
+  if (keepAliveSource) {
+    try {
+      keepAliveSource.stop()
+    } catch {
+      // ignore
+    }
+    try {
+      keepAliveSource.disconnect()
+    } catch {
+      // ignore
+    }
+    keepAliveSource = null
+  }
+  if (keepAliveGain) {
+    try {
+      keepAliveGain.disconnect()
+    } catch {
+      // ignore
+    }
+    keepAliveGain = null
   }
 }
 

@@ -16,7 +16,8 @@ import { pickWords } from './game/words'
 import {
   prepareNarrator,
   prefetchAndDecode,
-  stopSpeaking,
+  releaseNarratorAudio,
+  stopPlayback,
   warmUpVoices,
   type NarratorEngine,
 } from './game/tts'
@@ -134,7 +135,8 @@ export default function App() {
   )
 
   const beginRound = useCallback(async () => {
-    stopSpeaking()
+    // Не bump speakGen — иначе на телефоне «теряется» следующее слово после countdown
+    stopPlayback()
     const words = pendingWordsRef.current
     if (!words.length) {
       const used = state.slots.map((s) => s.word)
@@ -230,13 +232,17 @@ export default function App() {
           drawMode={state.settings.drawMode}
           speed={state.settings.speed}
           artistName={artist.name}
-          upcomingWords={state.slots
-            .slice(state.currentSlotIndex + 1, state.currentSlotIndex + 6)
-            .map((s) => s.word)}
-          onComplete={(dataUrl) =>
+          onComplete={(dataUrl) => {
+            // Последний слот → викторина: отпустить keep-alive
+            if (state.currentSlotIndex >= state.slots.length - 1) {
+              releaseNarratorAudio()
+            }
             dispatch({ type: 'COMPLETE_SLOT', dataUrl })
-          }
-          onBack={() => dispatch({ type: 'ABORT_ROUND' })}
+          }}
+          onBack={() => {
+            releaseNarratorAudio()
+            dispatch({ type: 'ABORT_ROUND' })
+          }}
         />
       )}
 

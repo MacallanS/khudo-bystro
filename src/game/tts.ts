@@ -1,5 +1,10 @@
 import * as piper from '@mintplex-labs/piper-tts-web'
-import { getAudioContext, resumeSfx } from './sfx'
+import {
+  getAudioContext,
+  holdAudioContext,
+  releaseAudioContextHold,
+  resumeSfx,
+} from './sfx'
 import type { Speed } from './types'
 
 /**
@@ -41,7 +46,6 @@ let currentAudio: HTMLAudioElement | null = null
 let currentSource: AudioBufferSourceNode | null = null
 let endCurrentPlay: (() => void) | null = null
 let speakGen = 0
-let unlocked = false
 let piperReady = false
 let piperProgress = 0
 let activeEngine: NarratorEngine | null = null
@@ -245,11 +249,8 @@ async function storeFetchedAudio(
 ): Promise<string> {
   cache.set(key, src)
   arrayCache.set(key, data.slice(0))
-  try {
-    await decodeToBuffer(key, data)
-  } catch {
-    // decode позже в ensureDecoded / speak
-  }
+  // Decode сразу — иначе на телефоне «догоняем» по ходу и глохнем
+  await decodeToBuffer(key, data)
   trimCache()
   return src
 }
@@ -455,86 +456,37 @@ function trimCache(): void {
 }
 
 /** Основной путь: Web Audio BufferSource — переживает countdown на телефоне. */
-function playBuffer(
+async function playBuffer(
   buf: AudioBuffer,
   speed: Speed,
   gen: number,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stopCurrent()
-    if (gen !== speakGen) {
-      resolve()
-      return
-    }
-    const ctx = getAudioContext()
-    if (!ctx) {
-      reject(new Error('no AudioContext'))
-      return
-    }
+  stopCurrent()
+  if (gen !== speakGen) return
 
-    void (async () => {
-      try {
-        if (ctx.state === 'suspended') await ctx.resume()
-      } catch {
-        // ignore
-      }
-      if (gen !== speakGen) {
-        resolve()
-        return
-      }
+  const ctx = getAudioContext()
+  if (!ctx) throw new Error('no AudioContext')
 
-      const source = ctx.createBufferSource()
-      const gain = ctx.createGain()
-      source.buffer = buf
-      source.playbackRate.value = PLAYBACK_RATE[speed]
-      gain.gain.value = 1
-      source.connect(gain)
-      gain.connect(ctx.destination)
-      currentSource = source
+  try {
+    if (ctx.state !== 'running') await ctx.resume()
+  } catch {
+    // ignore
+  }
+  holdAudioContext()
+  if (gen !== speakGen) return
+  if (ctx.state !== 'running') {
+    throw new Error('AudioContext suspended')
+  }
 
-      let settled = false
-      const settle = (err?: unknown) => {
-        if (settled) return
-        settled = true
-        window.clearTimeout(timer)
-        if (endCurrentPlay === release) endCurrentPlay = null
-        if (currentSource === source) currentSource = null
-        try {
-          source.disconnect()
-          gain.disconnect()
-        } catch {
-          // ignore
-        }
-        if (err && gen === speakGen) reject(err)
-        else resolve()
-      }
-      const release = () => settle()
-      endCurrentPlay = release
-
-      const timer = window.setTimeout(() => settle(), 12_000)
-      source.onended = () => settle()
-      try {
-        source.start(0)
-      } catch (err) {
-        settle(err)
-      }
-    })()
-  })
-}
-
-function playSrc(src: string, speed: Speed, gen: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stopCurrent()
-    if (gen !== speakGen) {
-      resolve()
-      return
-    }
-
-    const audio = new Audio()
-    currentAudio = audio
-    audio.preload = 'auto'
-    audio.playbackRate = PLAYBACK_RATE[speed]
-    audio.src = src
+  await new Promise<void>((resolve, reject) => {
+    const source = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    source.buffer = buf
+    source.playbackRate.value = PLAYBACK_RATE[speed]
+    gain.gain.value = 1
+    source.connect(gain)
+    gain.connect(ctx.destination)
+    currentSource = source
 
     let settled = false
     const settle = (err?: unknown) => {
@@ -542,40 +494,27 @@ function playSrc(src: string, speed: Speed, gen: number): Promise<void> {
       settled = true
       window.clearTimeout(timer)
       if (endCurrentPlay === release) endCurrentPlay = null
-      if (currentAudio === audio) currentAudio = null
+      if (currentSource === source) currentSource = null
+      try {
+        source.onended = null
+        source.disconnect()
+        gain.disconnect()
+      } catch {
+        // ignore
+      }
       if (err && gen === speakGen) reject(err)
       else resolve()
     }
     const release = () => settle()
     endCurrentPlay = release
 
-    const timer = window.setTimeout(() => {
-      try {
-        audio.onended = null
-        audio.onerror = null
-        audio.pause()
-        audio.removeAttribute('src')
-        audio.load()
-      } catch {
-        // ignore
-      }
-      settle()
-    }, 12000)
-
-    audio.onended = () => settle()
-    audio.onerror = () => settle(new Error('audio error'))
-    void audio.play().catch(async (err) => {
-      try {
-        await resumeSfx()
-        if (gen !== speakGen) {
-          settle()
-          return
-        }
-        await audio.play()
-      } catch {
-        settle(err)
-      }
-    })
+    const timer = window.setTimeout(() => settle(), 12_000)
+    source.onended = () => settle()
+    try {
+      source.start(0)
+    } catch (err) {
+      settle(err)
+    }
   })
 }
 
@@ -686,12 +625,12 @@ export function getNarratorStatus(): NarratorStatus {
 /** Разблокировка Web Audio по жесту (клик «Начать») — HTMLAudio не нужен. */
 export async function armNarrator(): Promise<void> {
   if (typeof window === 'undefined') return
-  unlocked = true
   await resumeSfx()
+  holdAudioContext()
   const ctx = getAudioContext()
   if (ctx) {
     try {
-      // Тихий тик — context остаётся running после countdown
+      // Тихий тик — подтверждает destination после resume
       const buf = ctx.createBuffer(1, 1, ctx.sampleRate)
       const src = ctx.createBufferSource()
       src.buffer = buf
@@ -721,7 +660,6 @@ export async function prepareNarrator(
   preparePromise = (async () => {
     // Context можно создать заранее; resume — на жесте «Начать»
     getAudioContext()
-    unlocked = true
     await waitForVoices()
     onProgress?.(10)
 
@@ -799,17 +737,12 @@ export async function speakWord(
       return
     }
 
-    await resolveAudioSrc(text, 'speak')
+    // Только заранее декодированный буфер — без HTMLAudio и без fetch по ходу
+    let buf = bufferCache.get(text) ?? null
+    if (!buf) buf = await ensureDecoded(text)
     if (isStale(gen, opts)) return
-    const buf = await ensureDecoded(text)
-    if (isStale(gen, opts)) return
-    if (buf) {
-      await playBuffer(buf, speed, gen)
-      return
-    }
-    const src = cache.get(text)
-    if (!src) throw new Error('no audio')
-    await playSrc(src, speed, gen)
+    if (!buf) throw new Error(`not preloaded: ${text}`)
+    await playBuffer(buf, speed, gen)
   } catch (err) {
     if (isStale(gen, opts)) return
     if (
@@ -830,28 +763,52 @@ export async function speakWord(
   }
 }
 
-/** Fetch + decode всех фраз раунда до старта (мобильный Web Audio). */
+/**
+ * Fetch + decode ВСЕХ фраз раунда до старта.
+ * Incomplete → throw (кнопка «Начать» не должна появляться с дырами).
+ */
 export async function prefetchAndDecode(
   words: string[],
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
-  if (!unlocked && !activeEngine) return
   if (activeEngine === 'native') return
   getAudioContext()
   const total = words.length
+  const failed: string[] = []
   for (let i = 0; i < words.length; i++) {
     const raw = words[i]!
     const text = normalizeRuWord(raw) || raw.trim().toLowerCase()
+    if (!text) {
+      onProgress?.(i + 1, total)
+      continue
+    }
     try {
-      if (text) {
+      if (!bufferCache.has(text)) {
         await resolveAudioSrc(text, 'prefetch')
-        await ensureDecoded(text)
+        const buf = await ensureDecoded(text)
+        if (!buf) failed.push(text)
       }
     } catch {
-      // одно слово не валит весь прогрев
+      failed.push(text)
     }
     onProgress?.(i + 1, total)
   }
+  for (const raw of words) {
+    const text = normalizeRuWord(raw) || raw.trim().toLowerCase()
+    if (text && !bufferCache.has(text) && !failed.includes(text)) {
+      failed.push(text)
+    }
+  }
+  if (failed.length) {
+    throw new Error(
+      `Не прогрето ${failed.length} из ${total}: ${failed.slice(0, 5).join(', ')}`,
+    )
+  }
+}
+
+export function isPhraseReady(word: string): boolean {
+  const text = normalizeRuWord(word) || word.trim().toLowerCase()
+  return Boolean(text && bufferCache.has(text))
 }
 
 export async function prefetchWords(
@@ -891,10 +848,21 @@ export async function ensureReady(
   }
 }
 
-export function stopSpeaking(): void {
-  speakGen += 1
+/** Остановить звук без смены поколения (перед стартом раунда). */
+export function stopPlayback(): void {
   stopCurrent()
   cancelSystemVoice()
+}
+
+export function stopSpeaking(): void {
+  speakGen += 1
+  stopPlayback()
+}
+
+/** Выход с диктанта — можно отпустить keep-alive. */
+export function releaseNarratorAudio(): void {
+  stopSpeaking()
+  releaseAudioContextHold()
 }
 
 export function pauseSpeaking(): void {

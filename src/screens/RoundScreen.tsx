@@ -3,9 +3,7 @@ import { CanvasDraw } from '../components/CanvasDraw'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ruCardinal } from '../game/ruNumbers'
 import {
-  ensureReady,
   GAP_MS,
-  prefetchWords,
   randomGap,
   speakWord,
   stopSpeaking,
@@ -24,7 +22,6 @@ type Props = {
   drawMode: DrawMode
   speed: Speed
   artistName: string
-  upcomingWords?: string[]
   onComplete: (dataUrl?: string) => void
   onBack: () => void
 }
@@ -36,7 +33,6 @@ export function RoundScreen({
   drawMode,
   speed,
   artistName,
-  upcomingWords = [],
   onComplete,
   onBack,
 }: Props) {
@@ -55,18 +51,6 @@ export function RoundScreen({
   const speechAbortRef = useRef(false)
   onCompleteRef.current = onComplete
   pausedRef.current = paused
-
-  const upcomingKey = upcomingWords.join('\n')
-
-  useEffect(() => {
-    const words = upcomingKey ? upcomingKey.split('\n') : []
-    // Пары: следующий номер + слово, потом ещё дальше
-    const pairs: string[] = []
-    for (let i = 0; i < words.length; i++) {
-      pairs.push(ruCardinal(index + 2 + i), words[i]!)
-    }
-    void prefetchWords(pairs)
-  }, [upcomingKey, index])
 
   useEffect(() => {
     const onVis = () => {
@@ -113,21 +97,12 @@ export function RoundScreen({
         statusRef.current = 'speak'
         setStatus('speak')
         const numberText = ruCardinal(index + 1)
-        await ensureReady([numberText, slot.word], {
-          isCancelled: speakAborted,
-        })
+        // Всё уже в bufferCache с Ready — только resume context, без fetch по ходу
         if (done()) return
         if (speechAbortRef.current || pausedRef.current) {
           await waitWhilePaused()
           if (done()) return
           continue
-        }
-        // Следующий слот греем в фоне, пока говорим текущий
-        if (upcomingWords[0]) {
-          void prefetchWords([
-            ruCardinal(index + 2),
-            upcomingWords[0],
-          ])
         }
         const say = async (text: string) => {
           try {
