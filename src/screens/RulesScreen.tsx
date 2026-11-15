@@ -8,7 +8,7 @@ type Props = {
   onPlay: () => void
 }
 
-const WORD_COUNTS: WordCount[] = [10, 15, 25, 40]
+const WORD_COUNTS: WordCount[] = [10, 15, 25, 30, 35, 40]
 
 export function RulesScreen({ onBack, onPlay }: Props) {
   const [sheetCount, setSheetCount] = useState<WordCount>(25)
@@ -51,7 +51,7 @@ export function RulesScreen({ onBack, onPlay }: Props) {
           Скачай в Word и распечатай — рисуй в ячейках, номер = слово. Не нужно
           разлиновывать.
         </p>
-        <div className="seg seg-4">
+        <div className="seg seg-wrap">
           {WORD_COUNTS.map((n) => (
             <button
               key={n}

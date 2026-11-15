@@ -404,6 +404,18 @@ h3 {
   grid-template-columns: repeat(4, 1fr);
 }
 
+.seg.seg-wrap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+@media (min-width: 420px) {
+  .seg.seg-wrap {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
 .seg-btn {
   min-height: 44px;
   border-radius: 8px;

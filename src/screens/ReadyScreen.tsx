@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ScorePeek } from '../components/ScorePeek'
 import { quizPlan } from '../game/reducer'
@@ -7,7 +7,7 @@ import { armNarrator, wait, type NarratorEngine } from '../game/tts'
 import type { GameSettings, Player, WordCategory } from '../game/types'
 import { categoryLabel } from '../game/words'
 
-type Phase = 'preparing' | 'ready' | 'counting'
+type Phase = 'preparing' | 'ready' | 'error' | 'counting'
 
 type Props = {
   artist: Player
@@ -54,38 +54,41 @@ export function ReadyScreen({
   const [count, setCount] = useState<number | null>(null)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [retryTick, setRetryTick] = useState(0)
   const startedRef = useRef(false)
   const cancelledRef = useRef(false)
 
-  useEffect(() => {
-    cancelledRef.current = false
-    startedRef.current = false
+  const runPrepare = useCallback(async () => {
     setPhase('preparing')
     setProgress(0)
     setError(null)
     setCount(null)
+    startedRef.current = false
+    try {
+      await onPrepare((pct) => {
+        if (!cancelledRef.current) setProgress(pct)
+      })
+      if (cancelledRef.current) return
+      setPhase('ready')
+      setProgress(100)
+      setError(null)
+      await resumeSfx()
+      beepReady()
+    } catch {
+      if (cancelledRef.current) return
+      setError('Не удалось загрузить диктора. Проверь звук.')
+      setPhase('error')
+      setProgress(0)
+    }
+  }, [onPrepare])
 
-    void (async () => {
-      try {
-        await onPrepare((pct) => {
-          if (!cancelledRef.current) setProgress(pct)
-        })
-        if (cancelledRef.current) return
-        setPhase('ready')
-        setProgress(100)
-        await resumeSfx()
-        beepReady()
-      } catch {
-        if (cancelledRef.current) return
-        setError('Не удалось загрузить диктора. Проверь звук.')
-        setPhase('ready')
-      }
-    })()
-
+  useEffect(() => {
+    cancelledRef.current = false
+    void runPrepare()
     return () => {
       cancelledRef.current = true
     }
-  }, [onPrepare, artist.id])
+  }, [runPrepare, artist.id, retryTick])
 
   const requestBack = () => {
     if (phase === 'counting') return
@@ -94,7 +97,7 @@ export function ReadyScreen({
   }
 
   const handleBegin = () => {
-    if (phase !== 'ready' || startedRef.current) return
+    if (phase !== 'ready' || error || startedRef.current) return
     startedRef.current = true
     setPhase('counting')
     void (async () => {
@@ -199,7 +202,18 @@ export function ReadyScreen({
         </div>
       )}
 
-      {error && <p className="hint">{error}</p>}
+      {phase === 'error' && error && (
+        <>
+          <p className="hint">{error}</p>
+          <button
+            type="button"
+            className="btn primary wide"
+            onClick={() => setRetryTick((n) => n + 1)}
+          >
+            Повторить
+          </button>
+        </>
+      )}
 
       {phase === 'counting' && count != null && (
         <div className="countdown-stage" aria-live="assertive">
@@ -210,7 +224,7 @@ export function ReadyScreen({
         </div>
       )}
 
-      {phase === 'ready' && (
+      {phase === 'ready' && !error && (
         <button
           type="button"
           className="btn primary wide"

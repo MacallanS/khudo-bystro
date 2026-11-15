@@ -57,6 +57,24 @@ function answer(
   return next
 }
 
+describe('quizPlan ~74%', () => {
+  it('3 игрока, 25 слов → 19 вопросов / 10 кругов', () => {
+    expect(quizPlan(3, 25)).toEqual({ askers: 2, target: 19, rounds: 10 })
+  })
+
+  it('3 игрока, 40 слов → 30 вопросов / 15 кругов', () => {
+    expect(quizPlan(3, 40)).toEqual({ askers: 2, target: 30, rounds: 15 })
+  })
+
+  it('2 игрока, 30 слов → 22 вопроса / 22 круга', () => {
+    expect(quizPlan(2, 30)).toEqual({ askers: 1, target: 22, rounds: 22 })
+  })
+
+  it('3 игрока, 35 слов → 26 вопросов / 13 кругов', () => {
+    expect(quizPlan(3, 35)).toEqual({ askers: 2, target: 26, rounds: 13 })
+  })
+})
+
 describe('quiz scoring', () => {
   it('верно → художник, забыл → спрашивающий (2 игрока)', () => {
     let state = quizState(['Аня', 'Боря'], 10)
@@ -131,5 +149,51 @@ describe('quiz scoring', () => {
     expect(state.lastRoundSummary).not.toBeNull()
     const summary = state.lastRoundSummary!
     expect(summary.correct + summary.missed).toBe(target)
+  })
+})
+
+describe('usedWords across party', () => {
+  it('BEGIN_ROUND копит слова; второй раунд не пересекается с первым', () => {
+    let state = createInitialState()
+    state = {
+      ...state,
+      phase: 'ready',
+      players: playersOf('Аня', 'Боря'),
+    }
+
+    const first = ['кот', 'собака', 'рыба']
+    state = gameReducer(state, { type: 'BEGIN_ROUND', words: first })
+    expect(state.usedWords).toEqual(first)
+
+    state = gameReducer(state, { type: 'NEXT_ARTIST' })
+    expect(state.slots).toEqual([])
+    expect(state.usedWords).toEqual(first)
+
+    const second = ['мышь', 'лошадь', 'корова']
+    state = gameReducer(state, { type: 'BEGIN_ROUND', words: second })
+    expect(state.usedWords).toEqual([...first, ...second])
+    expect(new Set(state.usedWords).size).toBe(first.length + second.length)
+  })
+
+  it('REMATCH и START_PARTY очищают usedWords', () => {
+    let state = createInitialState()
+    state = {
+      ...state,
+      phase: 'ready',
+      players: playersOf('Аня', 'Боря'),
+      usedWords: ['кот', 'собака'],
+    }
+
+    state = gameReducer(state, { type: 'REMATCH' })
+    expect(state.usedWords).toEqual([])
+
+    state = gameReducer(state, {
+      type: 'BEGIN_ROUND',
+      words: ['рыба', 'птица'],
+    })
+    expect(state.usedWords).toEqual(['рыба', 'птица'])
+
+    state = gameReducer(state, { type: 'GO_LOBBY' })
+    expect(state.usedWords).toEqual([])
   })
 })

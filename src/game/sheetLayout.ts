@@ -7,6 +7,8 @@ export const SHEET_LAYOUT: Record<
   10: { cols: 2, rows: 5, perPage: 10 },
   15: { cols: 3, rows: 5, perPage: 15 },
   25: { cols: 5, rows: 5, perPage: 25 },
+  30: { cols: 5, rows: 6, perPage: 30 },
+  35: { cols: 5, rows: 7, perPage: 35 },
   40: { cols: 5, rows: 4, perPage: 20 },
 }
 
@@ -20,7 +22,15 @@ export function buildSheetDocHtml(count: WordCount): string {
   const { cols, perPage } = SHEET_LAYOUT[count]
   const pages = sheetPageCount(count)
   const cellHeight =
-    count <= 10 ? '140pt' : count <= 15 ? '110pt' : count <= 25 ? '95pt' : '110pt'
+    count <= 10
+      ? '140pt'
+      : count <= 15
+        ? '110pt'
+        : count <= 25
+          ? '95pt'
+          : count <= 35
+            ? '85pt'
+            : '110pt'
 
   const pageHtml = Array.from({ length: pages }, (_, pageIndex) => {
     const start = pageIndex * perPage

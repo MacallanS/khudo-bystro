@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS: GameSettings = {
 }
 
 const SPEEDS: Speed[] = ['slow', 'normal', 'fast', 'chaos']
-const WORD_COUNTS: WordCount[] = [10, 15, 25, 40]
+const WORD_COUNTS: WordCount[] = [10, 15, 25, 30, 35, 40]
 const CATEGORY_SET = new Set<string>([
   'animals',
   'food',
@@ -70,21 +70,20 @@ function sanitizeSettings(raw: GameState['settings'] | undefined): GameSettings 
   }
 }
 
-/** Больше игроков → меньше кругов (4→3, 6→2), вопросов не меньше 8. */
+/** ~74% слов раунда спрашивают в викторине. */
+const QUIZ_ASK_RATIO = 0.74
+
 export function quizPlan(
   playerCount: number,
   wordCount: number,
 ): { askers: number; rounds: number; target: number } {
   const askers = Math.max(1, playerCount - 1)
   const words = Math.max(1, wordCount)
-  let rounds = Math.max(2, 6 - askers)
-  let target = askers * rounds
-  if (target < 8) {
-    rounds = Math.ceil(8 / askers)
-    target = askers * rounds
-  }
-  target = Math.min(words, target)
-  rounds = Math.max(1, Math.ceil(target / askers))
+  const target = Math.min(
+    words,
+    Math.max(1, Math.round(words * QUIZ_ASK_RATIO)),
+  )
+  const rounds = Math.max(1, Math.ceil(target / askers))
   return { askers, rounds, target }
 }
 
@@ -98,6 +97,7 @@ export function createInitialState(): GameState {
     settings: { ...DEFAULT_SETTINGS },
     artistIndex: 0,
     artistsDone: 0,
+    usedWords: [],
     slots: [],
     currentSlotIndex: 0,
     askerTurn: 0,
@@ -208,12 +208,34 @@ export function sanitizeParty(raw: GameState): GameState {
     phase = 'score'
   }
 
+  const usedSeen = new Set<string>()
+  const usedWords: string[] = []
+  if (Array.isArray(raw.usedWords)) {
+    for (const w of raw.usedWords) {
+      const word = String(w ?? '')
+        .trim()
+        .toLowerCase()
+      if (!word || usedSeen.has(word)) continue
+      usedSeen.add(word)
+      usedWords.push(word)
+    }
+  }
+  for (const s of slots) {
+    const word = String(s.word ?? '')
+      .trim()
+      .toLowerCase()
+    if (!word || usedSeen.has(word)) continue
+    usedSeen.add(word)
+    usedWords.push(word)
+  }
+
   return {
     phase,
     players,
     settings,
     artistIndex,
     artistsDone,
+    usedWords,
     slots,
     currentSlotIndex: 0,
     askerTurn: Math.max(0, Number(raw.askerTurn) || 0),
@@ -270,6 +292,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         ...state,
         phase: 'lobby',
         slots: [],
+        usedWords: [],
         currentSlotIndex: 0,
         selectedSlotIndex: null,
         revealWord: null,
@@ -310,6 +333,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         phase: 'ready',
         artistIndex: 0,
         artistsDone: 0,
+        usedWords: [],
         players: state.players.map((p) => ({
           ...p,
           name: p.name.trim(),
@@ -334,10 +358,19 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         answered: false,
       }))
       const plan = quizPlan(state.players.length, slots.length)
+      const seen = new Set(state.usedWords)
+      const usedWords = [...state.usedWords]
+      for (const word of action.words) {
+        const w = word.trim().toLowerCase()
+        if (!w || seen.has(w)) continue
+        seen.add(w)
+        usedWords.push(w)
+      }
       return {
         ...state,
         phase: 'round',
         slots,
+        usedWords,
         currentSlotIndex: 0,
         askerTurn: 0,
         quizAskTarget: plan.target,
@@ -516,6 +549,7 @@ export function gameReducer(state: GameState, action: GameAction): GameState {
         phase: 'ready',
         artistIndex: 0,
         artistsDone: 0,
+        usedWords: [],
         players: state.players.map((p) => ({ ...p, score: 0 })),
         slots: [],
         currentSlotIndex: 0,

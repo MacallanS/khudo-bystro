@@ -38,6 +38,8 @@ const SILERO_PROBE_MS = 6_000
 /** Короче на мобиле: 404/зависание SW не должны жечь 20 с на слово */
 const SILERO_FETCH_MS = 5_000
 const PIPER_READY_MS = 45_000
+/** Cache-bust для Workbox CacheFirst на /tts/eugene/ */
+const BAKED_TTS_VER = 7
 
 export type NarratorEngine = 'silero' | 'piper' | 'google' | 'native'
 export type NarratorStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -67,8 +69,17 @@ export type SpeakOpts = {
   isCancelled?: () => boolean
 }
 
+function isCancelled(opts?: SpeakOpts): boolean {
+  return !!opts?.isCancelled?.()
+}
+
 function isStale(gen: number, opts?: SpeakOpts): boolean {
-  return gen !== speakGen || !!opts?.isCancelled?.()
+  return gen !== speakGen || isCancelled(opts)
+}
+
+/** Единый ключ кэша для prefetch / speak / isPhraseReady. */
+export function phraseKey(raw: string): string {
+  return normalizeRuWord(raw) || raw.trim().toLowerCase()
 }
 
 function cancelSystemVoice(): void {
@@ -157,16 +168,15 @@ function localTtsUrl(word: string): string {
   return `/api/tts?q=${encodeURIComponent(word)}&voice=eugene&v=6`
 }
 
-/** Ключ файла = normalizeRuWord + пробелы → `_` (как в tts-server/bake.py). */
+/** Ключ файла = phraseKey + пробелы → `_` (как в tts-server/bake.py). */
 function bakedSlug(word: string): string {
-  const key = normalizeRuWord(word) || word.trim().toLowerCase()
-  return key.replace(/\s+/g, '_')
+  return phraseKey(word).replace(/\s+/g, '_')
 }
 
 function bakedTtsUrl(word: string): string {
   const slug = bakedSlug(word)
   const base = import.meta.env.BASE_URL || '/'
-  return `${base}tts/eugene/${encodeURIComponent(slug)}.wav`
+  return `${base}tts/eugene/${encodeURIComponent(slug)}.wav?v=${BAKED_TTS_VER}`
 }
 
 async function fetchToObjectUrl(
@@ -356,10 +366,10 @@ async function resolveWithEngine(
   word: string,
   engine: NarratorEngine,
 ): Promise<string> {
-  const key = word.toLowerCase()
+  const key = phraseKey(word)
   const hit = cache.get(key)
   if (hit) {
-    if (!bufferCache.has(key)) void ensureDecoded(key)
+    if (!bufferCache.has(key)) await ensureDecoded(key)
     return hit
   }
 
@@ -385,9 +395,12 @@ async function resolveAudioSrc(
   word: string,
   priority: 'speak' | 'prefetch' = 'speak',
 ): Promise<string> {
-  const normalized = normalizeRuWord(word) || word.trim().toLowerCase()
+  const normalized = phraseKey(word)
   const hit = cache.get(normalized)
-  if (hit) return hit
+  if (hit) {
+    if (!bufferCache.has(normalized)) await ensureDecoded(normalized)
+    return hit
+  }
   const pending = inflight.get(normalized)
   if (pending) return pending
 
@@ -460,20 +473,19 @@ async function playBuffer(
   buf: AudioBuffer,
   speed: Speed,
   gen: number,
+  opts?: SpeakOpts,
 ): Promise<void> {
   stopCurrent()
-  if (gen !== speakGen) return
+  if (isCancelled(opts)) return
+  if (gen !== speakGen) throw new Error('aborted-gen')
 
   const ctx = getAudioContext()
   if (!ctx) throw new Error('no AudioContext')
 
-  try {
-    if (ctx.state !== 'running') await ctx.resume()
-  } catch {
-    // ignore
-  }
+  await resumeSfx()
   holdAudioContext()
-  if (gen !== speakGen) return
+  if (isCancelled(opts)) return
+  if (gen !== speakGen) throw new Error('aborted-gen')
   if (ctx.state !== 'running') {
     throw new Error('AudioContext suspended')
   }
@@ -502,8 +514,19 @@ async function playBuffer(
       } catch {
         // ignore
       }
-      if (err && gen === speakGen) reject(err)
-      else resolve()
+      if (isCancelled(opts)) {
+        resolve()
+        return
+      }
+      if (err) {
+        reject(err instanceof Error ? err : new Error('play failed'))
+        return
+      }
+      if (gen !== speakGen) {
+        reject(new Error('aborted-gen'))
+        return
+      }
+      resolve()
     }
     const release = () => settle()
     endCurrentPlay = release
@@ -722,15 +745,19 @@ export async function speakWord(
 ): Promise<void> {
   if (typeof window === 'undefined') return
   const gen = speakGen
-  if (isStale(gen, opts)) return
+  if (isCancelled(opts)) return
+  if (gen !== speakGen) throw new Error('aborted-gen')
   stopCurrent()
   if (activeEngine === 'native') cancelSystemVoice()
-  const text = normalizeRuWord(word) || word.trim()
-  if (!text || isStale(gen, opts)) return
+  const text = phraseKey(word)
+  if (!text) return
+  if (isCancelled(opts)) return
+  if (gen !== speakGen) throw new Error('aborted-gen')
 
   try {
     if (!activeEngine) await prepareNarrator()
-    if (isStale(gen, opts)) return
+    if (isCancelled(opts)) return
+    if (gen !== speakGen) throw new Error('aborted-gen')
 
     if (activeEngine === 'native') {
       await speakNative(text, speed, gen)
@@ -740,11 +767,12 @@ export async function speakWord(
     // Только заранее декодированный буфер — без HTMLAudio и без fetch по ходу
     let buf = bufferCache.get(text) ?? null
     if (!buf) buf = await ensureDecoded(text)
-    if (isStale(gen, opts)) return
+    if (isCancelled(opts)) return
+    if (gen !== speakGen) throw new Error('aborted-gen')
     if (!buf) throw new Error(`not preloaded: ${text}`)
-    await playBuffer(buf, speed, gen)
+    await playBuffer(buf, speed, gen, opts)
   } catch (err) {
-    if (isStale(gen, opts)) return
+    if (isCancelled(opts)) return
     if (
       stickyEngine &&
       (activeEngine === 'silero' || activeEngine === 'piper')
@@ -773,15 +801,11 @@ export async function prefetchAndDecode(
 ): Promise<void> {
   if (activeEngine === 'native') return
   getAudioContext()
-  const total = words.length
+  const keys = words.map((w) => phraseKey(w)).filter(Boolean)
+  const total = keys.length
   const failed: string[] = []
-  for (let i = 0; i < words.length; i++) {
-    const raw = words[i]!
-    const text = normalizeRuWord(raw) || raw.trim().toLowerCase()
-    if (!text) {
-      onProgress?.(i + 1, total)
-      continue
-    }
+  for (let i = 0; i < keys.length; i++) {
+    const text = keys[i]!
     try {
       if (!bufferCache.has(text)) {
         await resolveAudioSrc(text, 'prefetch')
@@ -791,23 +815,22 @@ export async function prefetchAndDecode(
     } catch {
       failed.push(text)
     }
-    onProgress?.(i + 1, total)
+    // Не показываем 100% до финальной проверки
+    if (i + 1 < total) onProgress?.(i + 1, total)
   }
-  for (const raw of words) {
-    const text = normalizeRuWord(raw) || raw.trim().toLowerCase()
-    if (text && !bufferCache.has(text) && !failed.includes(text)) {
-      failed.push(text)
-    }
+  for (const text of keys) {
+    if (!bufferCache.has(text) && !failed.includes(text)) failed.push(text)
   }
   if (failed.length) {
     throw new Error(
       `Не прогрето ${failed.length} из ${total}: ${failed.slice(0, 5).join(', ')}`,
     )
   }
+  onProgress?.(total, total)
 }
 
 export function isPhraseReady(word: string): boolean {
-  const text = normalizeRuWord(word) || word.trim().toLowerCase()
+  const text = phraseKey(word)
   return Boolean(text && bufferCache.has(text))
 }
 
@@ -837,7 +860,7 @@ export async function ensureReady(
   const gen = speakGen
   for (const raw of texts) {
     if (isStale(gen, opts)) return
-    const text = normalizeRuWord(raw) || raw.trim()
+    const text = phraseKey(raw)
     if (!text) continue
     try {
       if (!cache.has(text)) await resolveAudioSrc(text, 'speak')

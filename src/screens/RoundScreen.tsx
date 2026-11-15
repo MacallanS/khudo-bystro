@@ -4,6 +4,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ruCardinal } from '../game/ruNumbers'
 import {
   GAP_MS,
+  isPhraseReady,
   randomGap,
   speakWord,
   stopSpeaking,
@@ -40,6 +41,7 @@ export function RoundScreen({
   const [gapLeft, setGapLeft] = useState(0)
   const [gapBudget, setGapBudget] = useState(GAP_MS[speed])
   const [ttsError, setTtsError] = useState(false)
+  const [ttsErrorHint, setTtsErrorHint] = useState('')
   const [paused, setPaused] = useState(false)
   const [confirmLeave, setConfirmLeave] = useState(false)
   const draftUrl = useRef<string | undefined>(slot.drawingDataUrl)
@@ -73,6 +75,7 @@ export function RoundScreen({
     statusRef.current = 'speak'
     setStatus('speak')
     setTtsError(false)
+    setTtsErrorHint('')
     let cancelled = false
 
     const done = () => cancelled || finishedRef.current
@@ -105,6 +108,10 @@ export function RoundScreen({
           continue
         }
         const say = async (text: string) => {
+          if (!isPhraseReady(text)) {
+            setTtsErrorHint(`фраза не прогрета: ${text}`)
+            throw new Error(`not preloaded: ${text}`)
+          }
           try {
             await speakWord(text, speed, { isCancelled: speakAborted })
           } catch {
@@ -142,8 +149,18 @@ export function RoundScreen({
             continue
           }
           break
-        } catch {
-          if (!done() && !speakAborted()) setTtsError(true)
+        } catch (err) {
+          if (!done() && !speakAborted()) {
+            setTtsError(true)
+            const msg = err instanceof Error ? err.message : ''
+            if (msg.startsWith('not preloaded:')) {
+              setTtsErrorHint(msg.replace('not preloaded:', 'не прогрета:'))
+            } else if (msg === 'AudioContext suspended') {
+              setTtsErrorHint('звук заблокирован — нажми паузу и снова')
+            } else if (!ttsErrorHint) {
+              setTtsErrorHint('голос не ответил')
+            }
+          }
           if (speechAbortRef.current || pausedRef.current) {
             await waitWhilePaused()
             if (done()) return
@@ -251,7 +268,11 @@ export function RoundScreen({
         }`}
       >
         {ttsError && (
-          <p className="hint stage-hint">Голос не ответил — проверь звук</p>
+          <p className="hint stage-hint">
+            {ttsErrorHint
+              ? `Голос: ${ttsErrorHint}`
+              : 'Голос не ответил — проверь звук'}
+          </p>
         )}
         <p className="word-label">{label}</p>
         <p

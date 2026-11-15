@@ -1,6 +1,6 @@
 export type DrawMode = 'paper' | 'phone'
 export type Speed = 'slow' | 'normal' | 'fast' | 'chaos'
-export type WordCount = 10 | 15 | 25 | 40
+export type WordCount = 10 | 15 | 25 | 30 | 35 | 40
 export type WordCategory =
   | 'animals'
   | 'food'
@@ -56,6 +56,8 @@ export interface GameState {
   settings: GameSettings
   artistIndex: number
   artistsDone: number
+  /** Слова, уже выданные в этой партии (всем художникам). */
+  usedWords: string[]
   slots: Slot[]
   currentSlotIndex: number
   askerTurn: number

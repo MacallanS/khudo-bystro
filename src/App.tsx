@@ -14,6 +14,7 @@ import {
 import { dictationPrefetchOrder } from './game/ruNumbers'
 import { pickWords } from './game/words'
 import {
+  armNarrator,
   prepareNarrator,
   prefetchAndDecode,
   releaseNarratorAudio,
@@ -110,7 +111,7 @@ export default function App() {
 
   const prepareRound = useCallback(
     async (onProgress: (pct: number) => void): Promise<NarratorEngine> => {
-      const used = state.slots.map((s) => s.word)
+      const used = [...state.usedWords, ...state.slots.map((s) => s.word)]
       const words = pickWords(state.settings.wordCount, {
         exclude: used,
         categories: state.settings.categories,
@@ -131,15 +132,21 @@ export default function App() {
       }
       return engine
     },
-    [state.slots, state.settings.wordCount, state.settings.categories],
+    [
+      state.usedWords,
+      state.slots,
+      state.settings.wordCount,
+      state.settings.categories,
+    ],
   )
 
   const beginRound = useCallback(async () => {
     // Не bump speakGen — иначе на телефоне «теряется» следующее слово после countdown
     stopPlayback()
+    await armNarrator()
     const words = pendingWordsRef.current
     if (!words.length) {
-      const used = state.slots.map((s) => s.word)
+      const used = [...state.usedWords, ...state.slots.map((s) => s.word)]
       pendingWordsRef.current = pickWords(state.settings.wordCount, {
         exclude: used,
         categories: state.settings.categories,
@@ -147,7 +154,12 @@ export default function App() {
     }
     await requestWakeLock()
     dispatch({ type: 'BEGIN_ROUND', words: pendingWordsRef.current })
-  }, [state.slots, state.settings.wordCount, state.settings.categories])
+  }, [
+    state.usedWords,
+    state.slots,
+    state.settings.wordCount,
+    state.settings.categories,
+  ])
 
   const partyFinished =
     state.phase === 'finished' ||

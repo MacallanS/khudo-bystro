@@ -155,8 +155,8 @@ export function LobbyScreen({
 
       <div className="card-block">
         <h3>Слов за раунд</h3>
-        <div className="seg seg-4">
-          {([10, 15, 25, 40] as WordCount[]).map((n) => (
+        <div className="seg seg-wrap">
+          {([10, 15, 25, 30, 35, 40] as WordCount[]).map((n) => (
             <button
               key={n}
               type="button"

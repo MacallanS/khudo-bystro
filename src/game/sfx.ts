@@ -4,6 +4,7 @@ let ctx: AudioContext | null = null
 /** Тихий loop — iOS/Android иначе suspend-ят context после первой фразы. */
 let keepAliveSource: AudioBufferSourceNode | null = null
 let keepAliveGain: GainNode | null = null
+let keepAliveOsc: OscillatorNode | null = null
 
 /** Общий AudioContext для SFX и диктора (один resume по жесту). */
 export function getAudioContext(): AudioContext | null {
@@ -31,29 +32,7 @@ export async function resumeSfx(): Promise<void> {
   }
 }
 
-/** Держать context running на весь диктант (жест «Начать»). */
-export function holdAudioContext(): void {
-  const c = getAudioContext()
-  if (!c || keepAliveSource) return
-  try {
-    const buf = c.createBuffer(1, Math.max(1, Math.floor(c.sampleRate * 0.5)), c.sampleRate)
-    const src = c.createBufferSource()
-    const gain = c.createGain()
-    // Не 0: некоторые движки выкидывают полностью тихие ноды
-    gain.gain.value = 0.00008
-    src.buffer = buf
-    src.loop = true
-    src.connect(gain)
-    gain.connect(c.destination)
-    src.start(0)
-    keepAliveSource = src
-    keepAliveGain = gain
-  } catch {
-    // ignore
-  }
-}
-
-export function releaseAudioContextHold(): void {
+function clearKeepAliveNodes(): void {
   if (keepAliveSource) {
     try {
       keepAliveSource.stop()
@@ -67,6 +46,19 @@ export function releaseAudioContextHold(): void {
     }
     keepAliveSource = null
   }
+  if (keepAliveOsc) {
+    try {
+      keepAliveOsc.stop()
+    } catch {
+      // ignore
+    }
+    try {
+      keepAliveOsc.disconnect()
+    } catch {
+      // ignore
+    }
+    keepAliveOsc = null
+  }
   if (keepAliveGain) {
     try {
       keepAliveGain.disconnect()
@@ -75,6 +67,51 @@ export function releaseAudioContextHold(): void {
     }
     keepAliveGain = null
   }
+}
+
+/** Держать context running на весь диктант (жест «Начать»). */
+export function holdAudioContext(): void {
+  const c = getAudioContext()
+  if (!c) return
+
+  // Source «жив», а context уже suspended → пересоздаём после resume
+  if (keepAliveSource || keepAliveOsc) {
+    if (c.state === 'running') return
+    clearKeepAliveNodes()
+  }
+
+  try {
+    const gain = c.createGain()
+    // Не 0: некоторые движки выкидывают полностью тихие ноды
+    gain.gain.value = 0.00008
+    gain.connect(c.destination)
+    keepAliveGain = gain
+
+    const buf = c.createBuffer(
+      1,
+      Math.max(1, Math.floor(c.sampleRate * 0.5)),
+      c.sampleRate,
+    )
+    const src = c.createBufferSource()
+    src.buffer = buf
+    src.loop = true
+    src.connect(gain)
+    src.start(0)
+    keepAliveSource = src
+
+    // Дубль: oscillator надёжнее держит running на части Android/WebKit
+    const osc = c.createOscillator()
+    osc.frequency.value = 20
+    osc.connect(gain)
+    osc.start(0)
+    keepAliveOsc = osc
+  } catch {
+    clearKeepAliveNodes()
+  }
+}
+
+export function releaseAudioContextHold(): void {
+  clearKeepAliveNodes()
 }
 
 function tone(
