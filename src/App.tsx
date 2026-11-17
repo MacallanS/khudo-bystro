@@ -12,7 +12,12 @@ import {
   sanitizeParty,
 } from './game/reducer'
 import { dictationPrefetchOrder } from './game/ruNumbers'
-import { pickWords } from './game/words'
+import {
+  appendPlayedWords,
+  clearPlayedWords,
+  getPlayedWords,
+} from './game/playedWords'
+import { pickWordsForRound } from './game/words'
 import {
   armNarrator,
   prepareNarrator,
@@ -53,8 +58,31 @@ export default function App() {
     return sanitizeParty(raw)
   })
   const pendingWordsRef = useRef<string[]>([])
+  const [bankNotice, setBankNotice] = useState<string | null>(null)
   const stateRef = useRef(state)
   stateRef.current = state
+
+  const selectRoundWords = useCallback(() => {
+    const { words, bankReset } = pickWordsForRound(
+      state.settings.wordCount,
+      {
+        exclude: [...state.usedWords, ...state.slots.map((s) => s.word)],
+        categories: state.settings.categories,
+      },
+      getPlayedWords(),
+      clearPlayedWords,
+    )
+    if (bankReset) {
+      setBankNotice('Все слова уже были — начинаем список заново')
+      window.setTimeout(() => setBankNotice(null), 4000)
+    }
+    return words
+  }, [
+    state.settings.wordCount,
+    state.settings.categories,
+    state.usedWords,
+    state.slots,
+  ])
 
   useEffect(() => {
     warmUpVoices()
@@ -111,11 +139,7 @@ export default function App() {
 
   const prepareRound = useCallback(
     async (onProgress: (pct: number) => void): Promise<NarratorEngine> => {
-      const used = [...state.usedWords, ...state.slots.map((s) => s.word)]
-      const words = pickWords(state.settings.wordCount, {
-        exclude: used,
-        categories: state.settings.categories,
-      })
+      const words = selectRoundWords()
       pendingWordsRef.current = words
       // Двигатель ~0–35%, затем fetch+decode всех пар раунда 35–100%.
       const engine = await prepareNarrator((pct) =>
@@ -132,12 +156,7 @@ export default function App() {
       }
       return engine
     },
-    [
-      state.usedWords,
-      state.slots,
-      state.settings.wordCount,
-      state.settings.categories,
-    ],
+    [selectRoundWords],
   )
 
   const beginRound = useCallback(async () => {
@@ -146,20 +165,13 @@ export default function App() {
     await armNarrator()
     const words = pendingWordsRef.current
     if (!words.length) {
-      const used = [...state.usedWords, ...state.slots.map((s) => s.word)]
-      pendingWordsRef.current = pickWords(state.settings.wordCount, {
-        exclude: used,
-        categories: state.settings.categories,
-      })
+      pendingWordsRef.current = selectRoundWords()
     }
     await requestWakeLock()
-    dispatch({ type: 'BEGIN_ROUND', words: pendingWordsRef.current })
-  }, [
-    state.usedWords,
-    state.slots,
-    state.settings.wordCount,
-    state.settings.categories,
-  ])
+    const roundWords = pendingWordsRef.current
+    appendPlayedWords(roundWords)
+    dispatch({ type: 'BEGIN_ROUND', words: roundWords })
+  }, [selectRoundWords])
 
   const partyFinished =
     state.phase === 'finished' ||
@@ -181,6 +193,11 @@ export default function App() {
       <PullToRefresh />
       <UpdateBanner />
       <InstallBanner />
+      {bankNotice && (
+        <p className="bank-notice" role="status">
+          {bankNotice}
+        </p>
+      )}
 
       {state.phase === 'home' && (
         <HomeScreen

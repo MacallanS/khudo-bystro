@@ -70,6 +70,25 @@ button {
   border: 0;
 }
 
+.bank-notice {
+  position: fixed;
+  left: 50%;
+  bottom: calc(12px + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 95;
+  max-width: min(440px, calc(100vw - 32px));
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--fg, #1a1a1a);
+  background: color-mix(in srgb, var(--surface, #fff) 92%, #000 8%);
+  border: 1px solid color-mix(in srgb, var(--fg, #000) 12%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgb(0 0 0 / 12%);
+}
+
 .app-shell {
   min-height: 100dvh;
   padding:
@@ -79,6 +98,25 @@ button {
   max-width: 480px;
   margin: 0 auto;
   position: relative;
+}
+
+.bank-notice {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 95;
+  max-width: min(420px, calc(100vw - 32px));
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--ink, #1a1a1a);
+  background: rgba(255, 248, 220, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 /* —— Pull to refresh (PWA / mobile) —— */

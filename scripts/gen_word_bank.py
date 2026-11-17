@@ -3,6 +3,8 @@
 from collections import Counter
 from pathlib import Path
 
+from word_filters import is_diminutive, is_inflected
+
 DATA: dict[str, str] = {
     "animals": """
 кот собака рыба птица мышь лошадь корова свинья утка гусь курица петух коза овца
@@ -761,6 +763,15 @@ for cat, text in MORE2.items():
 for cat, text in MORE3.items():
     DATA[cat] = DATA.get(cat, "") + "\n" + text
 
+_EXTRA_DIR = Path(__file__).resolve().parent / "word_lists"
+if _EXTRA_DIR.is_dir():
+    for path in sorted(_EXTRA_DIR.glob("*.txt")):
+        cat = path.stem
+        if cat not in DATA:
+            continue
+        text = path.read_text(encoding="utf-8")
+        DATA[cat] = DATA.get(cat, "") + "\n" + text
+
 # Токены, которые не хотим в банке (жаргон / кривые формы / чистые прилагательные)
 BLOCK = {
     "ил",
@@ -804,6 +815,8 @@ def ok(w: str) -> bool:
     if w in ALLOW_ADJ_LIKE:
         return True
     if w.endswith(("ый", "ий", "ая", "ое", "ые", "ие", "ой")):
+        return False
+    if is_diminutive(w) or is_inflected(w):
         return False
     return True
 

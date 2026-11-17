@@ -118,9 +118,40 @@ export function pickWords(
     takeFrom(available, count, banned, picked)
   }
 
-  if (picked.length < count) {
-    takeFrom(WORD_BANK, count, banned, picked)
+  return picked.slice(0, count)
+}
+
+export type PickWordsResult = {
+  words: string[]
+  /** История на устройстве сброшена — банк для фильтра исчерпан, выбор с нуля */
+  bankReset: boolean
+}
+
+/**
+ * Выбор слов раунда с учётом долгой памяти телефона.
+ * При нехватке уникальных слов очищает playedWords (через onBankReset) и пробует снова.
+ */
+export function pickWordsForRound(
+  count: number,
+  opts: PickWordsOpts,
+  devicePlayed: string[],
+  onBankReset?: () => void,
+): PickWordsResult {
+  const partyExclude = opts.exclude ?? []
+  const deviceSet = new Set(
+    devicePlayed.map((w) => w.trim().toLowerCase()).filter(Boolean),
+  )
+  const exclude = [...deviceSet, ...partyExclude]
+
+  let words = pickWords(count, { ...opts, exclude })
+  if (words.length >= count) {
+    return { words, bankReset: false }
   }
 
-  return picked.slice(0, count)
+  onBankReset?.()
+  words = pickWords(count, {
+    ...opts,
+    exclude: partyExclude,
+  })
+  return { words, bankReset: true }
 }
