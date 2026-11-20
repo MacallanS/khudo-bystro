@@ -57,8 +57,10 @@ export function ReadyScreen({
   const [retryTick, setRetryTick] = useState(0)
   const startedRef = useRef(false)
   const cancelledRef = useRef(false)
+  const prepareGenRef = useRef(0)
 
   const runPrepare = useCallback(async () => {
+    const gen = ++prepareGenRef.current
     setPhase('preparing')
     setProgress(0)
     setError(null)
@@ -66,17 +68,30 @@ export function ReadyScreen({
     startedRef.current = false
     try {
       await onPrepare((pct) => {
-        if (!cancelledRef.current) setProgress(pct)
+        if (prepareGenRef.current === gen && !cancelledRef.current) {
+          setProgress(pct)
+        }
       })
-      if (cancelledRef.current) return
+      if (prepareGenRef.current !== gen || cancelledRef.current) return
       setPhase('ready')
       setProgress(100)
       setError(null)
-      await resumeSfx()
-      beepReady()
-    } catch {
-      if (cancelledRef.current) return
-      setError('Не удалось загрузить диктора. Проверь звук.')
+      // Бип не должен ронять уже готовый прогрев (особенно без жеста на PWA)
+      try {
+        await resumeSfx()
+        beepReady()
+      } catch {
+        // ignore
+      }
+    } catch (e) {
+      if (prepareGenRef.current !== gen || cancelledRef.current) return
+      const detail =
+        e instanceof Error && e.message.trim() ? e.message.trim() : ''
+      setError(
+        detail
+          ? `Не удалось загрузить диктора. ${detail}`
+          : 'Не удалось загрузить диктора. Проверь звук.',
+      )
       setPhase('error')
       setProgress(0)
     }
@@ -87,6 +102,7 @@ export function ReadyScreen({
     void runPrepare()
     return () => {
       cancelledRef.current = true
+      prepareGenRef.current += 1
     }
   }, [runPrepare, artist.id, retryTick])
 

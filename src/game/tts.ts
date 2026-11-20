@@ -35,8 +35,9 @@ const PLAYBACK_RATE: Record<Speed, number> = {
 const PIPER_VOICE = 'ru_RU-irina-medium' as const
 /** На мобильном github.io 900 ms часто не хватает → ложный fallback на native. */
 const SILERO_PROBE_MS = 6_000
-/** Короче на мобиле: 404/зависание SW не должны жечь 20 с на слово */
-const SILERO_FETCH_MS = 5_000
+/** Мобильная сеть / SW: 5 с мало на хвосте прогрева раунда */
+const SILERO_FETCH_MS = 10_000
+const SILERO_FETCH_RETRY_MS = 12_000
 const PIPER_READY_MS = 45_000
 /** Cache-bust для Workbox CacheFirst на /tts/eugene/ */
 const BAKED_TTS_VER = 7
@@ -225,7 +226,7 @@ async function fetchSileroAudio(
   } catch (first) {
     try {
       if (signal?.aborted) throw first
-      return await fetchWithTimeout(baked, Math.min(SILERO_FETCH_MS, 3_000), 'silero')
+      return await fetchWithTimeout(baked, Math.min(SILERO_FETCH_MS, 6_000), 'silero')
     } catch {
       if (import.meta.env.PROD) throw first
       const got = await fetchToObjectUrl(localTtsUrl(word), signal)
@@ -258,9 +259,10 @@ async function storeFetchedAudio(
   data: ArrayBuffer,
 ): Promise<string> {
   cache.set(key, src)
-  arrayCache.set(key, data.slice(0))
   // Decode сразу — иначе на телефоне «догоняем» по ходу и глохнем
   await decodeToBuffer(key, data)
+  // Не держим сырые wav рядом с AudioBuffer — OOM на хвосте prefetch
+  arrayCache.delete(key)
   trimCache()
   return src
 }
@@ -791,6 +793,19 @@ export async function speakWord(
   }
 }
 
+async function prefetchOne(text: string): Promise<boolean> {
+  try {
+    if (!bufferCache.has(text)) {
+      await resolveAudioSrc(text, 'prefetch')
+      const buf = await ensureDecoded(text)
+      if (!buf) return false
+    }
+    return bufferCache.has(text)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Fetch + decode ВСЕХ фраз раунда до старта.
  * Incomplete → throw (кнопка «Начать» не должна появляться с дырами).
@@ -806,18 +821,49 @@ export async function prefetchAndDecode(
   const failed: string[] = []
   for (let i = 0; i < keys.length; i++) {
     const text = keys[i]!
-    try {
-      if (!bufferCache.has(text)) {
-        await resolveAudioSrc(text, 'prefetch')
-        const buf = await ensureDecoded(text)
-        if (!buf) failed.push(text)
-      }
-    } catch {
-      failed.push(text)
-    }
+    const ok = await prefetchOne(text)
+    if (!ok) failed.push(text)
     // Не показываем 100% до финальной проверки
     if (i + 1 < total) onProgress?.(i + 1, total)
   }
+
+  // Второй проход только по дырам — типичный хвост на PWA/мобильной сети
+  if (failed.length) {
+    const retryList = [...failed]
+    failed.length = 0
+    for (const text of retryList) {
+      const old = cache.get(text)
+      if (old?.startsWith('blob:')) URL.revokeObjectURL(old)
+      cache.delete(text)
+      arrayCache.delete(text)
+      bufferCache.delete(text)
+      const ctrl = new AbortController()
+      const timer = window.setTimeout(
+        () => ctrl.abort(),
+        SILERO_FETCH_RETRY_MS,
+      )
+      try {
+        if (activeEngine === 'silero') {
+          const got = await fetchToObjectUrl(
+            bakedTtsUrl(text),
+            ctrl.signal,
+            'silero',
+          )
+          await storeFetchedAudio(text, got.src, got.data)
+        } else {
+          const ok = await prefetchOne(text)
+          if (!ok) failed.push(text)
+          continue
+        }
+        if (!bufferCache.has(text)) failed.push(text)
+      } catch {
+        failed.push(text)
+      } finally {
+        window.clearTimeout(timer)
+      }
+    }
+  }
+
   for (const text of keys) {
     if (!bufferCache.has(text) && !failed.includes(text)) failed.push(text)
   }
