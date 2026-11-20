@@ -253,14 +253,33 @@ async function decodeToBuffer(
   return buf
 }
 
+/** Одна повторная попытка decode после короткой паузы / resume. */
+async function decodeWithRetry(
+  key: string,
+  data: ArrayBuffer,
+): Promise<AudioBuffer> {
+  try {
+    return await decodeToBuffer(key, data)
+  } catch (first) {
+    await resumeSfx()
+    await wait(150)
+    try {
+      return await decodeToBuffer(key, data)
+    } catch {
+      throw first instanceof Error ? first : new Error('decode failed')
+    }
+  }
+}
+
 async function storeFetchedAudio(
   key: string,
   src: string,
   data: ArrayBuffer,
 ): Promise<string> {
   cache.set(key, src)
+  arrayCache.set(key, data.slice(0))
   // Decode сразу — иначе на телефоне «догоняем» по ходу и глохнем
-  await decodeToBuffer(key, data)
+  await decodeWithRetry(key, data)
   // Не держим сырые wav рядом с AudioBuffer — OOM на хвосте prefetch
   arrayCache.delete(key)
   trimCache()
@@ -273,7 +292,7 @@ async function ensureDecoded(key: string): Promise<AudioBuffer | null> {
   const data = arrayCache.get(key)
   if (data) {
     try {
-      return await decodeToBuffer(key, data)
+      return await decodeWithRetry(key, data)
     } catch {
       return null
     }
@@ -284,10 +303,20 @@ async function ensureDecoded(key: string): Promise<AudioBuffer | null> {
     const res = await fetch(src)
     const ab = await res.arrayBuffer()
     arrayCache.set(key, ab.slice(0))
-    return await decodeToBuffer(key, ab)
+    return await decodeWithRetry(key, ab)
   } catch {
     return null
   }
+}
+
+function probeErrorMessage(e: unknown): string {
+  if (e instanceof DOMException && e.name === 'AbortError') return 'timeout'
+  if (e instanceof Error) {
+    if (e.name === 'AbortError') return 'timeout'
+    const msg = e.message.trim()
+    return msg || 'failed'
+  }
+  return 'failed'
 }
 
 async function ensurePiper(onProgress?: (pct: number) => void): Promise<void> {
@@ -321,7 +350,11 @@ async function synthesizePiper(
   return { src: URL.createObjectURL(blob), data }
 }
 
+/** Последняя причина провала bake/local probe — для ошибки на Ready. */
+let lastSileroProbeError = ''
+
 async function probeBakedSilero(): Promise<string | null> {
+  let lastError = 'baked unavailable'
   for (let attempt = 0; attempt < 3; attempt++) {
     const ctrl = new AbortController()
     const timer = window.setTimeout(() => ctrl.abort(), SILERO_PROBE_MS)
@@ -331,14 +364,27 @@ async function probeBakedSilero(): Promise<string | null> {
         ctrl.signal,
         'silero',
       )
-      await storeFetchedAudio('кот', got.src, got.data)
+      const key = 'кот'
+      cache.set(key, got.src)
+      arrayCache.set(key, got.data.slice(0))
+      // Decode не валит probe: на телефоне без жеста decode иногда падает
+      try {
+        await decodeWithRetry(key, got.data)
+        arrayCache.delete(key)
+      } catch {
+        // сырые байты остаются в arrayCache — prefetch/speak догонят
+      }
+      trimCache()
+      lastSileroProbeError = ''
       return got.src
-    } catch {
+    } catch (e) {
+      lastError = probeErrorMessage(e)
       await wait(200 + attempt * 300)
     } finally {
       window.clearTimeout(timer)
     }
   }
+  lastSileroProbeError = lastError
   return null
 }
 
@@ -353,11 +399,23 @@ async function probeSilero(): Promise<string | null> {
     const got = await fetchToObjectUrl(localTtsUrl('кот'), ctrl.signal)
     if (got.engine !== 'silero') {
       URL.revokeObjectURL(got.src)
+      lastSileroProbeError = 'not silero'
       return null
     }
-    await storeFetchedAudio('кот', got.src, got.data)
+    const key = 'кот'
+    cache.set(key, got.src)
+    arrayCache.set(key, got.data.slice(0))
+    try {
+      await decodeWithRetry(key, got.data)
+      arrayCache.delete(key)
+    } catch {
+      // fetch ok — движок silero
+    }
+    trimCache()
+    lastSileroProbeError = ''
     return got.src
-  } catch {
+  } catch (e) {
+    lastSileroProbeError = probeErrorMessage(e)
     return null
   } finally {
     window.clearTimeout(timer)
@@ -669,7 +727,8 @@ export async function armNarrator(): Promise<void> {
 
 /**
  * Прогрев без слышимой речи.
- * Silero (локальный /api/tts) → Piper (браузер) → native (speechSynthesis).
+ * Prod/PWA: только bake Silero (без Piper — иначе залипание на 22–26%).
+ * Dev: Silero → Piper → native.
  */
 export async function prepareNarrator(
   onProgress?: (pct: number) => void,
@@ -695,6 +754,11 @@ export async function prepareNarrator(
       onProgress?.(100)
       narratorStatus = 'ready'
       return 'silero'
+    }
+
+    // На Pages bake обязателен — не тянем Piper (~десятки MB) и не зависаем на 22–26%.
+    if (import.meta.env.PROD) {
+      throw new Error(`silero: ${lastSileroProbeError || 'unavailable'}`)
     }
 
     onProgress?.(15)
