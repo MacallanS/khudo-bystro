@@ -63,17 +63,16 @@ export default function App() {
   stateRef.current = state
 
   const selectRoundWords = useCallback(() => {
-    const { words, bankReset } = pickWordsForRound(
+    const { words, reusedHistory } = pickWordsForRound(
       state.settings.wordCount,
       {
         exclude: [...state.usedWords, ...state.slots.map((s) => s.word)],
         categories: state.settings.categories,
       },
       getPlayedWords(),
-      clearPlayedWords,
     )
-    if (bankReset) {
-      setBankNotice('Все слова уже были — начинаем список заново')
+    if (reusedHistory) {
+      setBankNotice('Новых слов мало — могут повториться из прошлых игр')
       window.setTimeout(() => setBankNotice(null), 4000)
     }
     return words
@@ -112,6 +111,7 @@ export default function App() {
 
   const goHomeFresh = () => {
     clearParty()
+    clearPlayedWords()
     setResumeCandidate(null)
     dispatch({ type: 'GO_HOME' })
   }

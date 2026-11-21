@@ -40,7 +40,7 @@ const SILERO_FETCH_MS = 10_000
 const SILERO_FETCH_RETRY_MS = 12_000
 const PIPER_READY_MS = 45_000
 /** Cache-bust для Workbox CacheFirst на /tts/eugene/ */
-const BAKED_TTS_VER = 9
+const BAKED_TTS_VER = 10
 
 export type NarratorEngine = 'silero' | 'piper' | 'google' | 'native'
 export type NarratorStatus = 'idle' | 'loading' | 'ready' | 'error'

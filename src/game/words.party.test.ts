@@ -56,31 +56,39 @@ describe('pickWords + usedWords party bag', () => {
     expect(new Set(used).size).toBe(need)
   })
 
-  it('pickWordsForRound не повторяет devicePlayed и сбрасывает при исчерпании', () => {
+  it('pickWordsForRound не повторяет devicePlayed и не чистит историю при нехватке', () => {
     const device = ['кот', 'собака']
-    const played: string[] = []
-    const { words, bankReset } = pickWordsForRound(
-      5,
-      { categories: 'all' },
-      device,
-      () => played.push('__reset__'),
-    )
-    expect(bankReset).toBe(false)
+    const { words, reusedHistory } = pickWordsForRound(5, { categories: 'all' }, device)
+    expect(reusedHistory).toBe(false)
     expect(words.some((w) => device.includes(w))).toBe(false)
 
-    const tinyExclude = pickWords(wordBankSize(), {
+    const almostAll = pickWords(wordBankSize(), {
       exclude: [],
       categories: 'all',
     })
-    const almostAll = tinyExclude
-    const { words: few, bankReset: reset } = pickWordsForRound(
+    const { words: few, reusedHistory: reused } = pickWordsForRound(
       25,
       { categories: 'all' },
       almostAll,
-      () => played.push('reset'),
     )
-    expect(reset).toBe(true)
-    expect(played).toContain('reset')
+    expect(reused).toBe(true)
     expect(few.length).toBeGreaterThan(0)
+  })
+
+  it('банк тянет десятки партий без повторов (антиповтор на устройстве)', () => {
+    const per = 30
+    const parties = 40
+    expect(wordBankSize()).toBeGreaterThanOrEqual(per * parties)
+    const used: string[] = []
+    for (let i = 0; i < parties; i++) {
+      const { words, reusedHistory } = pickWordsForRound(
+        per,
+        { exclude: [], categories: 'all' },
+        used,
+      )
+      expect(reusedHistory).toBe(false)
+      expect(words).toHaveLength(per)
+      used.push(...words)
+    }
   })
 })

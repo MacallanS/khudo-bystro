@@ -123,19 +123,21 @@ export function pickWords(
 
 export type PickWordsResult = {
   words: string[]
-  /** История на устройстве сброшена — банк для фильтра исчерпан, выбор с нуля */
-  bankReset: boolean
+  /**
+   * Не хватило новых слов относительно истории телефона —
+   * добрали без очистки playedWords (сброс истории только кнопкой «домой»).
+   */
+  reusedHistory: boolean
 }
 
 /**
  * Выбор слов раунда с учётом долгой памяти телефона.
- * При нехватке уникальных слов очищает playedWords (через onBankReset) и пробует снова.
+ * Не очищает playedWords сам — история сбрасывается только при уходе домой.
  */
 export function pickWordsForRound(
   count: number,
   opts: PickWordsOpts,
   devicePlayed: string[],
-  onBankReset?: () => void,
 ): PickWordsResult {
   const partyExclude = opts.exclude ?? []
   const deviceSet = new Set(
@@ -143,15 +145,16 @@ export function pickWordsForRound(
   )
   const exclude = [...deviceSet, ...partyExclude]
 
-  let words = pickWords(count, { ...opts, exclude })
-  if (words.length >= count) {
-    return { words, bankReset: false }
+  const fresh = pickWords(count, { ...opts, exclude })
+  if (fresh.length >= count) {
+    return { words: fresh, reusedHistory: false }
   }
 
-  onBankReset?.()
-  words = pickWords(count, {
+  // Банк ещё большой, но история телефона почти вся — повторы из прошлых партий,
+  // внутри текущей партии usedWords по-прежнему исключаются.
+  const words = pickWords(count, {
     ...opts,
     exclude: partyExclude,
   })
-  return { words, bankReset: true }
+  return { words, reusedHistory: true }
 }

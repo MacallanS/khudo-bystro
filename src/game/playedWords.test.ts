@@ -58,4 +58,11 @@ describe('playedWords', () => {
     expect(state.usedWords).toEqual([])
     expect(getPlayedWords()).toEqual(['кот'])
   })
+
+  it('память телефона чистится только явным clearPlayedWords (кнопка домой)', () => {
+    appendPlayedWords(['кот', 'рыба'])
+    expect(getPlayedWords()).toHaveLength(2)
+    clearPlayedWords()
+    expect(getPlayedWords()).toEqual([])
+  })
 })
