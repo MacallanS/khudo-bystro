@@ -1,33 +1,96 @@
 # -*- coding: utf-8 -*-
-from pathlib import Path
-import re
+"""Сверка wordBank + числительные с public/tts/eugene/*.wav."""
+from __future__ import annotations
 
-bank = Path(r"d:/RussM/khudo-bystro/src/game/wordBank.ts").read_text(encoding="utf-8")
-words = re.findall(r"w: '([^']+)'", bank)
-eugene = Path(r"d:/RussM/khudo-bystro/public/tts/eugene")
-files = {p.stem for p in eugene.glob("*.wav")}
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+BANK = ROOT / "src" / "game" / "wordBank.ts"
+RU_NUMBERS = ROOT / "src" / "game" / "ruNumbers.ts"
+EUGENE = ROOT / "public" / "tts" / "eugene"
+
+EXTRA_CARDINALS = [
+    "один",
+    "два",
+    "три",
+    "четыре",
+    "пять",
+    "шесть",
+    "семь",
+    "восемь",
+    "девять",
+    "десять",
+    "одиннадцать",
+    "двенадцать",
+    "тринадцать",
+    "четырнадцать",
+    "пятнадцать",
+    "шестнадцать",
+    "семнадцать",
+    "восемнадцать",
+    "девятнадцать",
+    "двадцать",
+    "двадцать один",
+    "двадцать два",
+    "двадцать три",
+    "двадцать четыре",
+    "двадцать пять",
+    "двадцать шесть",
+    "двадцать семь",
+    "двадцать восемь",
+    "двадцать девять",
+    "тридцать",
+    "тридцать один",
+    "тридцать два",
+    "тридцать три",
+    "тридцать четыре",
+    "тридцать пять",
+    "тридцать шесть",
+    "тридцать семь",
+    "тридцать восемь",
+    "тридцать девять",
+    "сорок",
+]
+
 
 def slug(w: str) -> str:
-    return w.strip().lower().replace(" ", "_")
+    text = w.strip().lower()
+    text = re.sub(r"[^а-яё\-\s]+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.replace(" ", "_")
 
-missing = [w for w in words if slug(w) not in files]
-print("words", len(words), "files", len(files), "missing", len(missing))
-print("sample missing", missing[:50])
 
-cards = []
-ones = ["", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять"]
-teens = {10:"десять",11:"одиннадцать",12:"двенадцать",13:"тринадцать",14:"четырнадцать",15:"пятнадцать",16:"шестнадцать",17:"семнадцать",18:"восемнадцать",19:"девятнадцать"}
-tens = {20:"двадцать",30:"тридцать",40:"сорок"}
-for n in range(1, 41):
-    if n < 10:
-        cards.append(ones[n])
-    elif n < 20:
-        cards.append(teens[n])
-    elif n in tens:
-        cards.append(tens[n])
-    else:
-        ten = (n // 10) * 10
-        cards.append(f"{tens[ten]} {ones[n % 10]}")
+def wanted() -> set[str]:
+    slugs: set[str] = set()
+    bank = BANK.read_text(encoding="utf-8")
+    for m in re.finditer(r"\{\s*w:\s*'([^']+)'", bank):
+        s = slug(m.group(1))
+        if s:
+            slugs.add(s)
+    if RU_NUMBERS.is_file():
+        for m in re.finditer(r":\s*'([^']+)'", RU_NUMBERS.read_text(encoding="utf-8")):
+            s = slug(m.group(1))
+            if s and re.search(r"[а-яё]", s):
+                slugs.add(s)
+    for c in EXTRA_CARDINALS:
+        s = slug(c)
+        if s:
+            slugs.add(s)
+    slugs.add("кот")
+    return slugs
 
-miss_c = [c for c in cards if slug(c) not in files]
-print("cards missing", miss_c)
+
+def main() -> int:
+    files = {p.stem for p in EUGENE.glob("*.wav")} if EUGENE.is_dir() else set()
+    need = wanted()
+    missing = sorted(need - files)
+    orphans = sorted(files - need)
+    print("wanted", len(need), "files", len(files), "missing", len(missing), "orphans", len(orphans))
+    print("sample missing", missing[:40])
+    print("sample orphans", orphans[:20])
+    return 1 if missing else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

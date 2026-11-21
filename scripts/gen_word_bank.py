@@ -3,7 +3,12 @@
 from collections import Counter
 from pathlib import Path
 
+import pymorphy3
+
 from word_filters import is_diminutive, is_inflected
+
+ROOT = Path(__file__).resolve().parents[1]
+_MORPH = pymorphy3.MorphAnalyzer()
 
 DATA: dict[str, str] = {
     "animals": """
@@ -705,6 +710,34 @@ MORE3: dict[str, str] = {
 бутон корешок материк полуостров водоём чащоба обрыв утёс
 сосулька снегопад склон лавина обвал цунами прилив отлив
 пена вал маяк бакен буй
+ручеёк родничок полянка просека бор чащоба опушка перелесок
+водоём затон старица отмель дюна бархан утёс скала утёс
+утёс обрыв круча яр яр обрыв
+кочка кочкарник моховина торфяник
+ива верба осина ясень вяз бук граб липа черёмуха рябина
+шиповник боярышник калина бузина черника брусника
+ромашка василёк колокольчик незабудка ландыш подснежник
+нарцисс тюльпан пион астра хризантема гладиолус ирис
+мухомор сыроежка боровик лисичка маслёнок подосиновик
+жёлудь каштан шишка хвоя хвоинка мох лишайник
+роса иней изморозь гололёд слякоть лужа лужица
+ливень морось град снежинка сугроб сугроб сугроб
+гроза молния радуга зарница сияние
+бриз шквал ураган смерч торнадо тайфун
+прилив отлив волна вал бурун пена
+берег отмель галька булыжник валун
+пещера грот каньон ущелье расщелина
+плато нагорье низина лощина балка овраг
+пустыня оазис саванна прерия пампа
+джунгли сельва тайга тундра лесостепь
+остров полуостров архипелаг атолл риф
+вулкан кратер лава магма гейзер
+ледник айсберг полынья торосы
+родник ключ источник водопад каскад
+пруд озеро море океан залив бухта
+река речка ручей протока канал
+лес роща бор парк сад сквер аллея
+поле луг пастбище нива пашня
 """,
     "transport": """
 якорь палуба каюта трюм мачта шлюпка весло руль штурвал
@@ -756,11 +789,70 @@ MORE3: dict[str, str] = {
 """,
 }
 
+# Ещё простой добор (только рисуемые бытовые слова, по одному токену)
+MORE4: dict[str, str] = {
+    "animals": """
+игуана хамелеон варан геккон саламандра тритон
+мурена угорь осётр стерлядь хариус налим
+амадин неразлучник шиншилла мышонок
+лама альпака зубр
+""",
+    "food": """
+шаурма донер кебаб лагман манты хинкали
+лобио сациви ткемали галушки клёцки
+безе меренга тирамису чизкейк брауни
+смузи милкшейк капучино латте эспрессо американо
+""",
+    "home": """
+роллеты карниз плинтус диммер консоль
+""",
+    "transport": """
+аэростат дельтаплан гидроцикл багги
+""",
+    "nature": """
+кратер гейзер лава прибой бурун
+дубрава ельник сосняк березняк
+""",
+    "school": """
+""",
+    "tech": """
+саундбар репитер
+""",
+    "sport": """
+сноуборд лонгборд гандбол крикет падел сквош
+""",
+    "clothes": """
+анорак парка лонгслив поло
+""",
+    "jobs": """
+бариста сомелье
+""",
+    "body": """
+склера
+""",
+    "tools": """
+""",
+    "fantasy": """
+огр
+""",
+    "party": """
+караоке
+""",
+    "kitchen": """
+вок казанок
+""",
+    "city": """
+фудкорт
+""",
+}
+
 for cat, text in MORE.items():
     DATA[cat] = DATA.get(cat, "") + "\n" + text
 for cat, text in MORE2.items():
     DATA[cat] = DATA.get(cat, "") + "\n" + text
 for cat, text in MORE3.items():
+    DATA[cat] = DATA.get(cat, "") + "\n" + text
+for cat, text in MORE4.items():
     DATA[cat] = DATA.get(cat, "") + "\n" + text
 
 _EXTRA_DIR = Path(__file__).resolve().parent / "word_lists"
@@ -790,6 +882,83 @@ BLOCK = {
     "эскимошка",
     "пломбирчик",
     "почтальонша",
+    "шорк",
+    "одеялен",
+    "пилявин",
+    "шоркнув",
+    "шоркнул",
+    "глобасен",
+    "глобусен",
+    "дипломен",
+    "агарак",
+    "бракер",
+    "бракёр",
+    "акулин",
+    "эдлис",
+    "абдомен",
+    "абвиль",
+    "авилин",
+    "воркрафт",
+    "демагог",
+    "шкот",
+    "наркотик",
+    "наркотика",
+    "макото",
+    "грабёж",
+    "грабеж",
+    "порка",
+    "брак",
+    "удодик",
+    "страусик",
+    "наркоман",
+    "наркоманка",
+    "бред",
+    "мистер",
+    "пак",
+    "ракель",
+    "снос",
+    "розыск",
+    "подделка",
+    "банда",
+    "смысл",
+    "труд",
+    "процент",
+    "карьера",
+    "поддержка",
+    "шлюха",
+    "шлюшка",
+    "уголовка",
+    "левиафан",
+    "констебль",
+    "блицкриг",
+    "гад",
+    "акцент",
+    "выстрел",
+    "гнида",
+    "документ",
+    "идиот",
+    "идиотка",
+    "команда",
+    "криминалист",
+    "кузен",
+    "медпункт",
+    "метод",
+    "мразь",
+    "напасть",
+    "написать",
+    "нотариус",
+    "подонок",
+    "помочь",
+    "практика",
+    "прислуга",
+    "сволочь",
+    "тварь",
+    "товарищ",
+    "ублюдок",
+    "финн",
+    "фонд",
+    "центр",
+    "шериф",
 }
 
 ALLOW_ADJ_LIKE = {
@@ -805,12 +974,31 @@ ALLOW_ADJ_LIKE = {
 }
 
 
-def ok(w: str) -> bool:
+def is_drawable_noun(w: str) -> bool:
+    """Именительное ед.ч. существительное (или разрешённое «как сущ.»)."""
+    if w in ALLOW_ADJ_LIKE:
+        return True
+    for p in _MORPH.parse(w)[:4]:
+        tag = p.tag
+        if "NOUN" not in tag:
+            continue
+        if "nomn" not in tag or "sing" not in tag:
+            continue
+        if "Name" in tag or "Surn" in tag or "Patr" in tag:
+            continue
+        # слово ≈ лемма (ё/е)
+        nf = p.normal_form
+        if nf == w or nf.replace("ё", "е") == w.replace("ё", "е"):
+            return True
+    return False
+
+
+def ok(w: str, *, curated: bool = False) -> bool:
     if not w or w in BLOCK:
         return False
     if any("a" <= ch <= "z" for ch in w):
         return False
-    if "-" in w or len(w) < 2:
+    if "-" in w or len(w) < 2 or len(w) > 16:
         return False
     if w in ALLOW_ADJ_LIKE:
         return True
@@ -818,31 +1006,64 @@ def ok(w: str) -> bool:
         return False
     if is_diminutive(w) or is_inflected(w):
         return False
+    # curated ручные списки — мягче (детские формы); lexicon — только lemma noun
+    if not curated and not is_drawable_noun(w):
+        return False
+    if curated and not is_drawable_noun(w):
+        # всё же отсекаем явный не-noun мусор
+        tags = {_MORPH.parse(w)[0].tag.POS} if _MORPH.parse(w) else set()
+        if tags and "NOUN" not in tags and w not in ALLOW_ADJ_LIKE:
+            return False
     return True
 
 
-seen: set[str] = set()
-entries: list[tuple[str, str]] = []
+def main() -> None:
+    curated_cats = set(DATA.keys())
+    # слова из DATA/MORE* считаем curated до подмешивания word_lists
+    curated_tokens: set[str] = set()
+    for cat in curated_cats:
+        # DATA уже включает MORE после циклов выше
+        pass
 
-for cat, text in DATA.items():
-    for w in text.split():
-        w = w.strip().lower()
-        if not ok(w) or w in seen:
-            continue
-        seen.add(w)
-        entries.append((w, cat))
+    # Разделим: сначала собрать curated-only текст без word_lists
+    # (word_lists уже дописаны в DATA выше — перечитаем чистый curated из исходников нельзя
+    # легко). Пометим word_lists отдельно.
+    list_dir = Path(__file__).resolve().parent / "word_lists"
+    list_words: dict[str, set[str]] = {}
+    if list_dir.is_dir():
+        for path in sorted(list_dir.glob("*.txt")):
+            list_words[path.stem] = {
+                t.strip().lower() for t in path.read_text(encoding="utf-8").split() if t.strip()
+            }
 
-out: list[str] = []
-out.append("import type { WordCategory } from './types'\n\n")
-out.append("export type WordEntry = { w: string; c: WordCategory }\n\n")
-# через unknown — иначе tsc падает на огромном литерале (TS2590)
-out.append("export const WORD_BANK = [\n")
-for w, c in entries:
-    ww = w.replace("\\", "\\\\").replace("'", "\\'")
-    out.append(f"  {{ w: '{ww}', c: '{c}' }},\n")
-out.append("] as unknown as WordEntry[]\n")
+    seen: set[str] = set()
+    entries: list[tuple[str, str]] = []
 
-path = Path(r"d:\RussM\khudo-bystro\src\game\wordBank.ts")
-path.write_text("".join(out), encoding="utf-8")
-print("count", len(entries), "unique", len(seen))
-print(Counter(c for _, c in entries))
+    for cat, text in DATA.items():
+        extras = list_words.get(cat, set())
+        for w in text.split():
+            w = w.strip().lower()
+            curated = w not in extras
+            if not ok(w, curated=curated) or w in seen:
+                continue
+            seen.add(w)
+            entries.append((w, cat))
+
+    out: list[str] = []
+    out.append("import type { WordCategory } from './types'\n\n")
+    out.append("export type WordEntry = { w: string; c: WordCategory }\n\n")
+    out.append("export const WORD_BANK = [\n")
+    for w, c in entries:
+        ww = w.replace("\\", "\\\\").replace("'", "\\'")
+        out.append(f"  {{ w: '{ww}', c: '{c}' }},\n")
+    out.append("] as unknown as WordEntry[]\n")
+
+    path = ROOT / "src" / "game" / "wordBank.ts"
+    path.write_text("".join(out), encoding="utf-8")
+    print("wrote", path)
+    print("count", len(entries), "unique", len(seen))
+    print(Counter(c for _, c in entries))
+
+
+if __name__ == "__main__":
+    main()
